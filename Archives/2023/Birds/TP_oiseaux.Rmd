@@ -1,0 +1,478 @@
+---
+title: "Comportement territorial des fauvettes à tête noire - *Sylvia atricapilla*"
+author: "Bollaert Clara, Eparvier Alice, Nouaiti Zakari, Otero Laudouar Oscar, Sands Emily"
+date: "Mai 2023"
+output:
+  prettydoc::html_pretty:
+    toc: TRUE
+    number_sections: TRUE
+    theme: hpstr
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, include = T, message=F, warning = F)
+```
+
+```{r, echo=F}
+library(ade4)
+library(ggplot2)
+library(factoextra)
+#library(rgl)
+library(contrast)
+library(sjPlot)
+library(nlme)
+library(FactoMineR)
+library(prettydoc)
+```
+
+# Introduction
+
+Certaines espèces d'oiseaux ont un comportement territorial. Les mâles (le plus souvent), s'approprient un territoire qu'ils défendent bec et serres contre leurs conspécifiques. On cherche ici à explorer la réponse des mâles d'une espèce territoriale à la présence d'un autre mâle sur leur territoire, de la même espèce ou d'espèces apparentées.
+
+Notre modèle d'étude est la fauvette à tête noire (*Sylvia atricapilla*). Notre dispositif expérimental est le suivant : 6 mâles ont été repérés au Parc de Gerland, avec leur territoire respectif, suffisamment éloignés de façon à ce que l'acquisition des données pour un mâle ne perturbe pas les autres mâles de l'expérience. Nous passions d'un territoire à un autre pour l'acquisition des données, en changeant l'ordre de passage d'un jour sur l'autre de façon à ne pas échantillonner un oiseau toujours à la même heure. A chaque passage, on surveillait le territoire pendant 1 min 30, puis on diffusait un chant sur un haut-parleur positionné à la limite du territoire, pendant 1 min 30 également, et enfin on surveillait également pendant un dernier intervalle de 1 min 30 après la fin de la diffusion (pendant lequel on enregistrait avec un dictaphone).
+
+Les chants diffusés étaient les suivants :
+
+- Chant de fauvette à tête noire complet, ou seulement une de ses deux composantes : gazouillis et sifflements
+- Chant de fauvette des jardins
+- Chant de fauvette grisette
+- Chant de Mésange charbonnière : témoin négatif, on s'attend à une absence de réponse
+
+Les questions auxquelles on cherche à répondre sont les suivantes :
+
+- Influence de l'espèce intruse sur la réaction du mâle (et de la femelle)
+- Rôle respectif éventuel des gazouillis et des sifflements
+- Existence d'un phénomène d'atténuation lorsque l'oiseau s'habitue aux diffusions
+- Influence de la météo et de l'environnement : heure de la journée, température, fréquentation
+
+Les variables relevées étaient :
+
+- La manifestation du mâle avant le début de la diffusion
+- Le nombre de strophes chantées avant la diffusion
+- Le nombre de strophes chantées pendant et après la diffusion
+- La distance minimale à laquelle le mâle s'est approché de l'enceinte
+- Le temps entre le début de la diffusion et la première manifestation du mâle
+- Le nombre de cris émis par le mâle pendant et après la diffusion
+- Le nombre de fois que le mâle a survolé l'enceinte pendant et après la diffusion
+- La manifestation ou pas de la femelle
+- Une mesure de la fréquentation (nombre de personnes passées entre les observateurs et l'enceinte pendant la diffusion)
+- Des mesures météorologiques prises toutes les 30 min : température, vent moyen, vent maximal, précipitations, ensoleillement.
+
+
+
+
+
+
+
+# Visualisation des données
+
+```{r, include=F}
+data_oiseaux <- read.csv("~/Desktop/TP_oiseaux_analyse/oiiseaux_alice/data/data_oiseaux.csv")
+data_oiseaux <- data_oiseaux[,-23]
+data_oiseaux <- data_oiseaux[,-23]
+head(data_oiseaux)
+```
+
+On commence par visualiser quelques-unes des données brutes et leur répartition.
+
+## Influence du mâle
+
+```{r}
+par(mfrow=c(2,3))
+boxplot(data_oiseaux$STROPHES_AVANT ~ data_oiseaux$ID_MALE, xlab = "Numéro du mâle", ylab="Nombre de strophes avant diffusion")
+boxplot(data_oiseaux$STROPHES_APRES ~ data_oiseaux$ID_MALE, xlab = "Numéro du mâle", ylab="Nombre de strophes après diffusion")
+boxplot(data_oiseaux$CRIS ~ data_oiseaux$ID_MALE, xlab = "Numéro du mâle", ylab="Nombre de cris")
+boxplot(data_oiseaux$DISTANCE_MIN ~ data_oiseaux$ID_MALE, xlab = "Numéro du mâle", ylab="Distance d'approche")
+boxplot(data_oiseaux$SURVOLS ~ data_oiseaux$ID_MALE, xlab = "Numéro du mâle", ylab="Nombre de survols")
+boxplot(data_oiseaux$LATENCE ~ data_oiseaux$ID_MALE, xlab = "Numéro du mâle", ylab="Temps de réaction")
+```
+
+On voit que, pour la plupart des variables de réponse, il semble y avoir des différences notables entre les mâles. Par exemple, le mâle 3 semble réagir plus que les autres sur plusieurs variables (distance d'approche plus faible, plus de strophes avant et après, etc.), alors que les mâles 4 et 6 se manifestent globalement moins que les autres.
+
+Il semble qu'il y ait une variabilité inter-individuelle, un effet du mâle.
+
+## Influence du type de diffusion
+
+```{r}
+par(mfrow=c(2,3))
+boxplot(data_oiseaux$STROPHES_AVANT ~ data_oiseaux$DIFFUSION, xlab = "", ylab="Nombre de strophes avant diffusion", las=2)
+boxplot(data_oiseaux$STROPHES_APRES ~ data_oiseaux$DIFFUSION, xlab = "", ylab="Nombre de strophes après diffusion", las=2)
+boxplot(data_oiseaux$CRIS ~ data_oiseaux$DIFFUSION, xlab = "", ylab="Nombre de cris", las=2)
+boxplot(data_oiseaux$DISTANCE_MIN ~ data_oiseaux$DIFFUSION, xlab = "", ylab="Distance d'approche", las=2)
+boxplot(data_oiseaux$SURVOLS ~ data_oiseaux$DIFFUSION, xlab = "", ylab="Nombre de survols", las=2)
+boxplot(data_oiseaux$LATENCE ~ data_oiseaux$DIFFUSION, xlab = "", ylab="Temps de réaction", las=2)
+```
+
+On voit que, comme attendu, les mâles réagissent moins aux chants de Mésange charbonnière. Au contraire, ils semblent plus réagir à ceux des fauvettes à tête noire, peut-être un peu plus aux gazouillis seuls.
+
+On remarque également que les mâles semblent plus réagir aux chants de fauvette des jardins qu'à ceux de fauvette grisette, plus éloignée phylogénétiquement et écologiquement.
+
+## Influence du jour 
+
+```{r}
+par(mfrow=c(2,3))
+boxplot(data_oiseaux$STROPHES_AVANT ~ data_oiseaux$JOUR, xlab="Jour", ylab="Nombre de strophes avant diffusion")
+boxplot(data_oiseaux$STROPHES_APRES ~ data_oiseaux$JOUR, xlab="Jour", ylab="Nombre de strophes après diffusion")
+boxplot(data_oiseaux$CRIS ~ data_oiseaux$JOUR, xlab="Jour", ylab="Nombre de cris")
+boxplot(data_oiseaux$DISTANCE_MIN ~ data_oiseaux$JOUR, xlab="Jour", ylab="Distance d'approche")
+boxplot(data_oiseaux$SURVOLS ~ data_oiseaux$JOUR, xlab="Jour", ylab="Nombre de survols")
+boxplot(data_oiseaux$LATENCE ~ data_oiseaux$JOUR, xlab="Jour", ylab="Temps de réaction")
+```
+
+Il ne semble pas y avoir un effet d'atténuation au cours des jours.
+
+## Influence de l'heure
+
+```{r}
+par(mfrow=c(2,3))
+plot(data_oiseaux$STROPHES_AVANT ~ data_oiseaux$HEURE, xlab="Heure", ylab="Nombre de strophes avant diffusion")
+lines(lowess(data_oiseaux$HEURE,data_oiseaux$STROPHES_AVANT))
+plot(data_oiseaux$STROPHES_APRES ~ data_oiseaux$HEURE, xlab="Heure", ylab="Nombre de strophes après diffusion")
+lines(lowess(data_oiseaux$HEURE,data_oiseaux$STROPHES_APRES))
+plot(data_oiseaux$CRIS ~ data_oiseaux$HEURE, xlab="Heure", ylab="Nombre de cris")
+lines(lowess(data_oiseaux$HEURE,data_oiseaux$CRIS))
+plot(data_oiseaux$DISTANCE_MIN ~ data_oiseaux$HEURE, xlab="Heure", ylab="Distance d'approche")
+lines(lowess(data_oiseaux$HEURE,data_oiseaux$DISTANCE_MIN))
+plot(data_oiseaux$SURVOLS ~ data_oiseaux$HEURE, xlab="Heure", ylab="Nombre de survols")
+lines(lowess(data_oiseaux$HEURE,data_oiseaux$SURVOLS))
+plot(data_oiseaux$LATENCE ~ data_oiseaux$HEURE, xlab="Heure", ylab="Temps de réaction")
+lines(lowess(data_oiseaux$HEURE,data_oiseaux$LATENCE))
+```
+
+Pour le nombre de strophes avant et après, le nombre de cris et le nombre de survols, il y a tellement de valeurs nulles que la courbe de tendance est plaquée contre l'axe des abscisses, ce qui empêche d'observer une tendance.
+
+En revanche, pour la distance d'approche et le temps de réaction, moins soumis à ce problème, on voit une baisse de la réponse en début d'après-midi, qu'on pourrait attribuer au rythme circadien de l'espèce, éventuellement aux variables météorologiques.
+
+## Effet de la temperature
+```{r}
+par(mfrow=c(2,3))
+plot(data_oiseaux$STROPHES_AVANT ~ data_oiseaux$TEMPERATURE, xlab="Température", ylab="Nombre de strophes avant diffusion")
+lines(lowess(data_oiseaux$TEMPERATURE,data_oiseaux$STROPHES_AVANT))
+plot(data_oiseaux$STROPHES_APRES ~ data_oiseaux$TEMPERATURE, xlab="Température", ylab="Nombre de strophes après diffusion")
+lines(lowess(data_oiseaux$TEMPERATURE,data_oiseaux$STROPHES_APRES))
+plot(data_oiseaux$CRIS ~ data_oiseaux$TEMPERATURE, xlab="Température", ylab="Nombre de cris")
+lines(lowess(data_oiseaux$TEMPERATURE,data_oiseaux$CRIS))
+plot(data_oiseaux$DISTANCE_MIN ~ data_oiseaux$TEMPERATURE, xlab="Température", ylab="Distance d'approche")
+lines(lowess(data_oiseaux$TEMPERATURE,data_oiseaux$DISTANCE_MIN))
+plot(data_oiseaux$SURVOLS ~ data_oiseaux$TEMPERATURE, xlab="Température", ylab="Nombre de survols")
+lines(lowess(data_oiseaux$TEMPERATURE,data_oiseaux$SURVOLS))
+plot(data_oiseaux$LATENCE ~ data_oiseaux$TEMPERATURE, xlab="Température", ylab="Temps de réaction")
+lines(lowess(data_oiseaux$TEMPERATURE,data_oiseaux$LATENCE))
+```
+
+Le nombre de strophes avant et après, le nombre de cris et le nombre de survols présentent le même problème que tout à l'heure avec les courbes de tendance.
+
+Quand on regarde la distance d'approche et le temps de réaction, on voit qu'il y a une tendance à une plus forte réponse pour des températures moyennement basses (en-dessous de 20°C).
+
+# Analyse en Composantes Principales (ACP)
+
+On veut à présent produire des indices composites pour synthétiser les variables de réponse du mâle, de météorologie et d'environnement (météorologie + fréquentation, jour et heure). Ces indices nous serviront à faire des statistiques plus simplement.
+
+On s'en servira également pour avoir une idée des potentielles corrélations entre plusieurs de ces variables.
+
+## ACP des variables de réponse
+
+Le but est de créer un indice de réponse qui permettrait de quantifier les réponses aux diffusions. Pour cela on réalise une ACP à partir des variables : réaction de la femelle, nombre de survols, distance minimale d'approche, temps de latence, nombre de strophes après début de diffusion et nombre de cris.
+
+```{r}
+data_reponse <- subset(data_oiseaux, select=c("FEMELLE","SURVOLS","DISTANCE_MIN","LATENCE","STROPHES_APRES","CRIS"))
+
+acp <- dudi.pca(data_reponse,scannf=FALSE,nf=3)
+fviz_eig(acp)
+s.corcircle(acp$co, xax = 1, yax = 2)
+```
+
+On voit que la composante PC1 (qui explique 40% de la variance) corrèle beaucoup avec le nombre de strophes chantées après le début de la diffusion, et corrèle inversément avec le temps de latence et la distance minimale d'approche. La latence et la distance minimale d'approche expliquent une grande part de la variance.
+
+Parce que le temps de latence et la distance minimale peuvent prendre de très grandes valeurs dans les cas où l'oiseau ne s'est pas manifesté, largement plus plus grandes que les valeurs qu'elles prennent dans le cas contraire, on s'est demandé si ces deux valeurs n'auraient pas un impact disproportionné sur la forme du nuage. Il faut noter que ces valeurs (max de 180 secondes pour la latence et 90 mètres pour la distance minimale) sont arbitraires. On a donc voulu voir si en fixant un maximum plus bas pour la distance minimale, puis en supprimant l'une, l'autre ou les deux variables. On a observé que dans tous les cas, cela ne changeait pas vraiment la contribution des variables restantes aux composantes PC1 et PC2, et on a donc décidé de conserver ces variables (en fixant quand même à 50 le maximum pour la distance minimale).
+
+```{r, include=F}
+data_reponse <- subset(data_oiseaux, select=c("FEMELLE","SURVOLS","DISTANCE_MIN","LATENCE","STROPHES_APRES","CRIS"))
+data_reponse$DISTANCE_MIN[data_reponse$DISTANCE_MIN == 90] <- 50
+
+acp <- dudi.pca(data_reponse,scannf=FALSE,nf=3)
+s.corcircle(acp$co, xax = 1, yax = 2)
+```
+
+```{r, include=F}
+#data_reponse <- subset(data_oiseaux, select=c("FEMELLE","SURVOLS","DISTANCE_MIN","STROPHES_APRES","CRIS"))
+#data_reponse$DISTANCE_MIN[data_reponse$DISTANCE_MIN == 90] <- 50
+#data_reponse$LATENCE[data_reponse$LATENCE >= 90] <- 90
+
+#acp <- dudi.pca(data_reponse,scannf=FALSE,nf=3)
+#s.corcircle(acp$co, xax = 1, yax = 2)
+```
+
+```{r,include=F}
+data_reponse <- subset(data_oiseaux, select=c("FEMELLE","SURVOLS","DISTANCE_MIN","STROPHES_APRES","CRIS"))
+data_reponse$DISTANCE_MIN[data_reponse$DISTANCE_MIN == 90] <- 50
+
+acp <- dudi.pca(data_reponse,scannf=FALSE,nf=3)
+s.corcircle(acp$co, xax = 1, yax = 2)
+```
+
+```{r, include=F}
+data_reponse <- subset(data_oiseaux, select=c("FEMELLE","SURVOLS","STROPHES_APRES","CRIS"))
+
+acp <- dudi.pca(data_reponse,scannf=FALSE,nf=3)
+s.corcircle(acp$co, xax = 1, yax = 2)
+```
+
+On ajoute donc une colonne à notre tableau de données correspondant à la valeur de la composante PC1 pour chaque observation.
+
+```{r, echo=F}
+data_reponse <- subset(data_oiseaux,select=c("STROPHES_APRES","SURVOLS","LATENCE","DISTANCE_MIN","CRIS","FEMELLE"))
+data_reponse$DISTANCE_MIN[data_reponse$DISTANCE_MIN==90] <- 50
+acp_finale <- dudi.pca(data_reponse,scannf=FALSE,nf=3)
+indice_rep <- -acp_finale$li[,1]
+
+data_oiseaux <- cbind(data_oiseaux,indice_rep)
+colnames(data_oiseaux) <- c(colnames(data_oiseaux[1:22]),("INDICE_REP"))
+```
+
+## ACP des variables météorologiques
+
+On cherche maintenant similairement à produire un indice compilant toutes les données de météo en une variable.
+
+```{r}
+data_reponse <- subset(data_oiseaux, select=c("TEMPERATURE","VENT_MOY","VENT_MAX","PLUIE","ENSOLEILLEMENT"))
+
+acp <- dudi.pca(data_reponse,scannf=FALSE,nf=3)
+fviz_eig(acp)
+s.corcircle(acp$co, xax = 1, yax = 2)
+```
+
+Comme pour l'ACP des variables de réponse du mâle, on rajoute une colonne à notre tableau de données correspondant à l'indice météo (qui est la coordonnée sur l'axe PC1).
+
+
+On superpose également l'indice de réponse au cercle de corrélations de cette ACP.
+
+```{r}
+donnees_meteo <- subset(data_oiseaux,select=c("INDICE_REP","TEMPERATURE","VENT_MOY","VENT_MAX","ENSOLEILLEMENT","PLUIE"))
+acp_nouvelle = PCA(donnees_meteo, scale.unit=T,ncp=3,quanti.sup=1)
+```
+
+On voit que l'indice de réponse corrèle inversement avec la température et l'ensoleillement, et ne corrèle pas beaucoup avec l'intensité du vent. Ceci est cohérent avec le ressenti sur le terrain. Cependant la corrélation n'est pas très forte (la norme du vecteur INDICE_REP est très petite), et l'indice ne s'aligne pas très bien non plus avec les axes PC1 et PC2. On utilisera donc pour les statistiques la température en plus de la composante PC1.
+
+```{r, echo=F}
+data_reponse <- subset(data_oiseaux, select=c("TEMPERATURE","VENT_MOY","VENT_MAX","ENSOLEILLEMENT"))
+acp_finale <- dudi.pca(data_reponse, scannf=F,nf=3)
+INDICE_METEO <- acp_finale$li[,2]
+
+data_oiseaux <- cbind(data_oiseaux[1:23],INDICE_METEO)
+```
+
+## ACP des variables environnementales ?
+
+A compléter si on a le temps
+
+
+
+
+
+
+
+
+
+
+
+# Représentation graphique de la réponse selon les variables explicatives
+
+Avant de faire des tests statistiques, on visualise la répartition de l'indice de réponse en fonction des principales variables explicatives
+
+```{r}
+par(mfrow=c(2,3))
+boxplot(data_oiseaux$INDICE_REP ~ data_oiseaux$DIFFUSION, ylab="Indice de réponse",xlab="", las=2)
+boxplot(data_oiseaux$INDICE_REP ~ data_oiseaux$ID_MALE, ylab="Indice de réponse",xlab="Id du mâle")
+boxplot(data_oiseaux$INDICE_REP ~ data_oiseaux$JOUR, ylab="Indice de réponse",xlab="Jour")
+plot(data_oiseaux$INDICE_REP ~ data_oiseaux$INDICE_METEO, ylab="Indice de réponse",xlab="Indice météo")
+lines(lowess(data_oiseaux$INDICE_METEO,data_oiseaux$INDICE_REP))
+plot(data_oiseaux$INDICE_REP ~ data_oiseaux$TEMPERATURE, ylab="Indice de réponse",xlab="Température")
+lines(lowess(data_oiseaux$TEMPERATURE,data_oiseaux$INDICE_REP))
+plot(data_oiseaux$INDICE_REP ~ data_oiseaux$HEURE, ylab="Indice de réponse",xlab="Heure de la journée")
+lines(lowess(data_oiseaux$HEURE,data_oiseaux$INDICE_REP))
+```
+
+Globalement, on voit que le type de diffusion et l'identité du mâle ont une influence sur la valeur de l'indice de réponse (et donc sur l'intensité de réponse) du mâle. De façon cohérente avec nos observations précédentes, on n'a pas l'impression que le jour ait une influence marquée.
+
+On fait la même chose avec en variable dépendante la proportion de chant sifflé dans les strophes enregistrées à l'aide du dictaphone, et la durée desdites strophes.
+
+Encore de façon cohérente, on observe des tendances de l'indice de réponse en rapport avec l'indice météo, la température et l'heure de la journée.
+
+```{r}
+chants <- read.csv("~/Desktop/TP_oiseaux_analyse/oiiseaux_alice/data/Chants.csv")
+DUREE_GAZ <- chants$DUREE-chants$DUREE_SIF
+chants <- cbind(chants,DUREE_GAZ)
+
+PROPORTION_SIF <- chants$DUREE_SIF/(chants$DUREE_SIF+chants$DUREE_GAZ)
+chants <- cbind(chants,PROPORTION_SIF)
+```
+
+```{r}
+par(mfrow=c(2,3))
+hist(chants$PROPORTION_SIF)
+boxplot(PROPORTION_SIF~ID_MALE,data=chants)
+boxplot(PROPORTION_SIF~DIFFUSION,data=chants, las=2)
+boxplot(PROPORTION_SIF~NUMERO,data=chants)
+plot(PROPORTION_SIF~DUREE,data=chants)
+
+par(mfrow=c(2,3))
+hist(chants$DUREE)
+boxplot(DUREE~ID_MALE,data=chants)
+boxplot(DUREE~DIFFUSION,data=chants, las=2)
+boxplot(DUREE~NUMERO,data=chants)
+```
+
+Sur la proportion de chant sifflé, on voit d'abord que la distribution n'est pas du tout gaussienne, on ne pourra donc pas faire d'ANOVA dessus, on utilisera à la place un test non paramétrique. On voit par ailleurs que cette variable reste relativement constante, ou du moins peu variable en fonction de l'identité du mâle, du type de chant, du rang de la strophe dans l'enregistrement (NUMERO), et de la durée de la strophe.
+
+Sur la durée des strophes, la distribution est globalement gaussienne, mais il ne semble pas non plus y avoir d'effet de l'identité du mâle, du type de diffusion, ni du rang de la strophe.
+
+On en déduit que la structure des strophes est relativement indépendante du mâle et de la situation.
+
+
+A présent, on cherche à valider ces effets avec des tests statistiques : ANOVA, régression linéaire et test de Kruskal-Wallis.
+
+# Recherche d'effets par des méthodes statistiques
+
+## Avec PC1 comme indice de réponse
+
+Nous allons d'abord prendre l'axe PC1 comme indicateur de la réponse des mâles à l'expérimentation.
+
+### Recherche d'un effet de l'identité du mâle 
+
+D'après les boxplots précédents, il semble que les mâles n'aient pas la même intensité de réponse à l'expérience. Nous cherchons à déterminer si l'effet est statistiquement significatif avec un test d'ANOVA. L'ANOVA est réalisée en prenant le mâle 4 comme référence car c'est celui avec la réponse la plus faible.
+
+```{r, include=TRUE}
+
+data_oiseaux$ID_MALE <- as.factor(data_oiseaux$ID_MALE)
+data_oiseaux$ID_MALE <- relevel(data_oiseaux$ID_MALE, "4")
+anova <- lm(data_oiseaux$INDICE_REP ~ data_oiseaux$ID_MALE) 
+sjPlot::plot_model(anova, show.values=TRUE, show.p=TRUE)
+```
+
+Il y a globalement un effet du mâle. L'identité du mâle explique 14% de la variabilité.
+On peut classer les mâles selon leur intensité de réponse: le 4 et le 6 répondent le moins, le 3, 2, 1 et 5 sont ceux qui répondent le plus.
+
+### Recherche d'un effet du type de diffusion
+
+On cherche à savoir si certains types de diffusion provoquent significativement plus de réponse que d'autres. 
+
+On réalise une ANOVA en fonction des types de diffusion.
+```{r, include=TRUE}
+data_oiseaux$DIFFUSION <- as.factor(data_oiseaux$DIFFUSION)
+data_oiseaux$DIFFUSION <- relevel(data_oiseaux$DIFFUSION, "TN")
+anova_rep <- lm(INDICE_REP ~ DIFFUSION, data=data_oiseaux) 
+sjPlot::plot_model(anova_rep, show.values=TRUE, show.p=TRUE)
+```
+
+Il y a donc significativement plus de réponses aux enregistrements de fauvettes à tête noire gazouillis et sifflements que de réponses aux enregistrements témoins négatifs. Étonnamment, la réponse aux chants complets n'est pas significativement plus élevée que celle aux chants de mésange charbonnière. De plus, on a l'impression que l'indice de réponse aux chants de fauvettes des jardins est plus proche de l'indice de réponse aux chants complets de fauvette que l'indice aux chants de fauvette grisette.
+
+Nous allons ajouter un contraste pour comparer les différentes réponses entre elles.
+
+```{r}
+# Ajout du contraste
+
+fg_group <- list(DIFFUSION="FG")
+fj_group <- list(DIFFUSION="FJ")
+print(contrast(anova_rep, fg_group, fj_group))
+```
+
+Globalement, les mâles répondent significativement plus aux chants de fauvette des jardins qu'aux grisettes avec un seuil de 7%. 
+
+```{r}
+contr_group <- list(DIFFUSION=c("TN", "FG", "FJ", "FTNgaz", "FTNsif"))
+ftn_group <- list(DIFFUSION="FTNcomp")
+print(contrast(anova_rep, contr_group, ftn_group, cnames=paste0(c("TN", "FG", "FJ", "FTNgaz", "FTNsif"), " vs FTNcomp")))
+```
+
+Les mâles répondent quasiment de la même façon aux chants de fauvette à tête noire complets et aux chants de fauvettes des jardins, ce qui est à rapprocher de leur proximité phylogénétique, contrairement aux chants de la fauvette grisette.
+
+Ils ne répondent pas de la même façon aux chants complets et aux gazouillis, et la réponse aux sifflements est un peu plus proche de celle aux chants complets. Hypothèse: dans les chants complets, c'est la partie sifflée qui fait réagir les mâles plus que la partie gazouillée.
+
+Nous allons maintenant nous affranchir de l'effet du mâle. En effet, on sait que les mâles ne répondent pas tous de la même façon aux chants, et on ne sait pas quelle part de ça peut être liée au type d'enregistrement diffusé.
+
+```{r}
+anova_nlme=lme(INDICE_REP ~DIFFUSION, random=~1 | as.factor(ID_MALE), data=data_oiseaux)
+summary(anova_nlme)
+print(contrast(anova_nlme, contr_group, ftn_group, cnames=paste0(c("TN", "FG", "FJ", "FTNgaz", "FTNsif"), " vs FTNcomp")))
+```
+
+On obtient les mêmes résultats, avec de légères différences de p-value. 
+
+Ainsi, les mâles répondent le plus aux chants de FTNgaz, puis de FTNsif, puis aux chants de FTNcomp et FJ au même niveau, puis aux chants de FG et enfin aux chants de TN.
+
+Le type d'enregistrement modifie donc la réponse des mâles.
+
+Hypothèse: les gazouillis et les sifflements ont deux fonctions différentes.
+Pour le vérifier, on réalise un test statistique sur la proportions de sifflements en dans la réponse en fonction du type de diffusion. On visualise d'abord la répartition de la proportion de sifflements, ainsi qu'un boxplot de la proportion de sifflements en fonction du type de diffusion.
+ 
+```{r}
+par(mfrow=c(1,2))
+boxplot(chants$PROPORTION_SIF ~ chants$DIFFUSION, main='Prop sif en fonction de diffusion', ylab='Prop sif', xlab='Diffusion', las=3)
+hist(chants$PROPORTION_SIF, main='Histogramme de la prop sif')
+```
+
+On voit sur le boxplot que la proportion de sifflements dans les chants diffère selon le type d'enregistrement diffusé. Pour vérifier cette tendance statistiquement, nous allons réaliser un test. La répartition des proportions de sifflements n'étant pas gaussienne, on réalise un test de Kruskal-Wallis.
+
+```{r}
+kruskal.test(PROPORTION_SIF ~ DIFFUSION, data=chants)
+```
+
+La diffusion a donc un effet sur la proportion de sifflements au seuil de 75%. 
+
+Ainsi, les fauvettes sifflent plus dans leur réponse à des chants de conspécifiques qu'aux chants de mésange charbonnière.
+On peut donc supposer que les sifflements soient utilisés pour défendre le territoire contre des conspécifiques (ce qui est cohérent avec ce qu'on trouve dans la littérature).
+
+### Recherche d'un effet d'atténuation: influence du jour et de la session
+
+Compte tenu du coût énergétique du chant, il est possible que les oiseaux ne soient pas capables de chanter autant au dernier jour qu'au premier jour ou qu'ils apprennent à reconnaître les chants diffusés comme étant des leurres. Nous allons ainsi regarder si l'indice de réponse change au fil des jours et de la session de diffusion.
+
+```{r, include=TRUE}
+data_oiseaux$JOUR <- as.factor(data_oiseaux$JOUR)
+data_oiseaux$JOUR <- relevel(data_oiseaux$JOUR, "1")
+anova <- lm(data_oiseaux$INDICE_REP ~ data_oiseaux$JOUR)
+sjPlot::plot_model(anova, show.values=TRUE, show.p=TRUE)
+```
+
+Sur les 4 jours, il ne semble pas y avoir d'habituation, regardons l'indice de session.
+
+```{r}
+plot(data_oiseaux$INDICE_REP ~ data_oiseaux$SESSION_DIFF, main= 'Indice de réponse', ylab='Indice', xlab='Session')
+lines(lowess(data_oiseaux$INDICE_REP ~ data_oiseaux$SESSION_DIFF))
+anova <- lm(data_oiseaux$INDICE_REP ~ data_oiseaux$SESSION_DIFF)
+summary(anova)
+```
+
+Le coefficient linéaire de la régression est négatif et la valeur de la p-value est à la limite de la significativité. Ainsi, il y a peut-être un léger effet d'atténuation, mais qui reste brouillé par d'autres effets tels que l'heure ou la température. Cependant, un fitting linéaire n'est peut-être pas le plus approprié (ici la courbe se rapprocherait plus d'une exponentielle décroissante par exemple). 
+
+### Recherche d'un effet des conditions météo
+
+```{r, include=TRUE}
+anova <- lm(data_oiseaux$INDICE_REP ~ data_oiseaux$INDICE_METEO)
+summary(anova)
+sjPlot::plot_model(anova, show.values=TRUE, show.p=TRUE)
+```
+
+
+Indice négatif: plus le ressenti de température est bas, plus il y a une réponse. Il y a une corrélation négative entre l'indice de réponse et l'indice météo: les oiseaux réagissent plus quand il y a plus de vent et qu'il fait moins chaud.
+
+
+## Avec les chants post comme indice de réponse
+
+### Les mâles ont-ils tous le même comportement? 
+
+### Les mâles réagissent-ils aux chants d'oiseaux d'espèces différentes?
+
+### Y a-t-il une atténuation de la réponse au cours de l'expérimentation?
+
+### Les conditions météos influencent-elles la réponse?
+
+# Conclusion
+
+
+
+
+
+
+

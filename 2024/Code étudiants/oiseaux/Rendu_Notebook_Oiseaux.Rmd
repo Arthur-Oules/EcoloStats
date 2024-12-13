@@ -1,0 +1,1874 @@
+---
+title: "Rendu_Notebook_Oiseaux"
+author: "Groupe Oiseaux"
+date: "`r Sys.Date()`"
+output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE) # warnings=FALSE, messages=FALSE
+library(here) # pour donner l'emplacement simplement
+library(tidyverse)
+library(ade4) # pour les ACP
+library(binom) # Pour calculer les IC
+library(ggpubr) # faire les tests sur les plots
+library(viridis) # couleurs viridis
+library(adegraphics) # graphiques pour ACP
+library(FactoMineR) # graphiques ggplot ACP
+library(factoextra) # graphiques ggplot ACP
+library(gridExtra) # mettre plusieurs plot cote a cote
+library(ggfortify) # 
+library(modelbased) # test de contrast
+library(lme4) # modele mixte non utilise
+library(nlme) # modele mixte utilise
+library(rstatix) # fonction convert_as_factor
+library(latex2exp) # ecrire en latex sur certains graphiques
+library(pscl) # pour faire des modeles de Poisson zero-inflated
+library(performance) # check modeles
+```
+
+## I. Import des données et variables de travail
+
+Avant de pouvoir faire quelque analyse que ce soit, il est important que
+nos données soient propres et que nous ayons toutes les mesures
+nécessaires à disposition. Dans cette première partie, nous nous
+occuperons donc d'importer nos données, de les nettoyer, de préparer ce
+dont nous aurons besoin plus tard mais aussi de calculer de nouvelles
+variables synthétiques pour nos futures analyses statistiques.
+
+### A. Construction du tableau de données
+
+Tout d'abord, nous importons nos données brutes et celles de l'année
+dernière. Nous les stockons dans un même tableau tout en notant dans une
+nouvelle colonne à quel jeu de données appartient chaque ligne.
+
+```{r data_raw}
+data_2024 <- read_csv(
+        here("data", "table_birds_2024.csv"),
+        col_names = TRUE,
+        col_types = "Dtfifffffiiiiiiiididdi",
+        col_select = c(-23)
+        ) |> na.omit()
+
+data_2023 <- read_csv(
+        "data/table_birds_2023.csv", 
+        col_names=TRUE,
+        col_types = "ftfifffffiiiiiiiididdi",
+        col_select = c(-23)
+        ) |> na.omit()
+
+data <- data_2024 |>
+        mutate(JOUR=factor(JOUR, labels = as.character(seq(1,4))),
+               ANNEE = "2024", .before=1) |>
+        bind_rows(mutate(data_2023, ANNEE = "2023"))
+```
+
+Ensuite, nous homogénéisons les données que nous avons à disposition.
+
+Premièrement, nous voulons que les valeurs correspondant à `LATENCE` et
+`DISTANCE_MIN` infinie soient les mêmes quelque soit l'origine des
+données. Ici, en 2023, les étudiants avaient choisi respectivement
+$180 s$ pour la première variable et $50 m$ pour la seconde et nous
+avons choisi $10000 s$ et $10000 m$. Le problème est que nous ne
+comptions pas la latence jusqu'à $180 s$ mais $90 s$ et que nous
+faisions la distinction entre les oiseaux qui ne s'étaient pas montrés
+(`LATENCE` et `DISTANCE_MIN` à $10000$) et ceux que nous entendions de
+loin (`DISTANCE_MIN` à $50 m$). Nous avons alors décidé de considérer
+comme infinies les valeurs de `LATENCE` supérieures à $90 s$ et que les
+`DISTANCE_MIN` correspondantes soient également infinies. Bien que très
+criticable, cela nous semble la meilleure option afin que les jeux de
+données soient le plus comparables possible. Les valeurs infinies de
+`LATENCE` seront fixées à $180 s$ et celles de `DISTANCE_MIN` à $75 m$.
+Nous fixerons alors le seuil de `LATENCE` à $180 s$ et de `DISTANCE_MIN`
+à $100 m$.
+
+```{r data_clean}
+data <- data |> mutate(
+        LATENCE = ifelse(LATENCE>90, 180, LATENCE),
+        DISTANCE_MIN = ifelse(DISTANCE_MIN==50 & LATENCE==180, 75,
+                              DISTANCE_MIN),
+        DISTANCE_MIN = ifelse(DISTANCE_MIN > 50, 75, DISTANCE_MIN)
+        )
+```
+
+Il reste encore deux lignes "abhérentes" dans notre tableau et elles
+viennent de 2024 : alors que la `DISTANCE_MIN` est infinie, c'est à dire
+(normalement) que nous ne savons pas où est l'oiseau, la `LATENCE` n'est
+pas infinie... Nous préférons "corriger" la `LATENCE` et la mettre à
+$180 s$.
+
+```{r data_clean_bis}
+data <- data |> mutate(LATENCE = ifelse(DISTANCE_MIN==75, 180, LATENCE))
+```
+
+Nous allons maintenant introduire de nouvelles colonnes qui servirons à
+nos analyses.
+
+D'abord, nous définissons `LATENCE_BINAIRE` comme la présence ou
+l'absence de réponse de l'oiseau étudié.
+
+```{r LATENCE_BINAIRE}
+data <- data |> mutate(LATENCE_BINAIRE=ifelse(LATENCE==180,0,1), .before=c(13))
+```
+
+Ensuite, nous créons une colonne `MATIN_APREM` qui nous permettra de
+séparer les jours en deux : avant la pause du repas et après la pause du
+repas. A $12:30$, nous étions toujours sur cette pause, donc nous
+choisissons cet horaire pour dichotomiser les journées.
+
+```{r MATIN_APREM}
+data <- data |> mutate(
+        MATIN_APREM=factor(ifelse(HEURE < hms("12:30:00"), 0, 1),
+                           labels=c("Matin", "Aprem")), .after=c(3)
+        )
+```
+
+On calcule également une nouvelle colonne telle que `CHANT_REPONSE` =
+`STROPHES_APRES` - `STROPHES_AVANT*2`. Cela permettra de tester la
+réponse en terme de chant des fauvettes à tête noire.
+
+```{r CHANT_REPONSE}
+data <- data |> mutate(
+        CHANT_REPONSE = STROPHES_APRES - STROPHES_AVANT*2, .after=c(16)
+        )
+```
+
+On ordonne ensuite les variables `factor` qui s'y prêtent.
+
+```{r ord_factor}
+data$ID_MALE <- factor(
+        data$ID_MALE,
+        levels = 1:11,
+        ordered = TRUE
+        )
+
+# Pour les tests et que les graphiques soient propres
+data$DIFFUSION <- factor(
+        data$DIFFUSION,
+        levels = c("FT_comp", "FT_sif", "FT_gaz", "FJ", "FG", "MC"),
+        ordered = TRUE
+        )
+```
+
+Nous créons aussi une variable `DISTANCE_MIN_FACTOR` car nous avons
+mesuré la variable `DISTANCE_MIN` comme une variable qualitative
+ordinale et non pas comme une variable quantitative.
+
+```{r distance_factor}
+data$DISTANCE_MIN_FACTOR <- factor(
+        data$DISTANCE_MIN,
+        labels=c("0", "< 2","< 5","< 10", "< 15", "< 20","< 50", "Infini"),
+        ordered = TRUE
+        )
+```
+
+Comme on a la colonne `ANNEE`, on peut simplifier `JOUR` et faire en
+sorte qu'elle indique le jour de la semaine (entre 1 et 4).
+
+```{r}
+data <- data |> mutate(JOUR=factor(JOUR,labels=rep(1:4,2)))
+```
+
+Maintenant, nous allons garder quelques sous-tableaux de `data` car nous
+allons les utiliser régulièrement dans nos analyses.
+
+Tout d'abord, nous mettons `data_2023` et `data_2024` à jour.
+
+```{r update_annees}
+data_2023 <- data |> filter(ANNEE == 2023)
+data_2024 <- data |> filter(ANNEE == 2024)
+```
+
+Ensuite, nous prenons un tableau contenant les lignes où les oiseaux ont
+répondu à la diffusion et un autre où ils n'ont pas répondu.
+
+```{r reponse_nreponse}
+data_reponse <- data |> filter(LATENCE < 180)
+data_nreponse <- data |> filter(LATENCE==180)
+```
+
+A présent, nous pouvons utiliser proprement nos données.
+
+### B. Analyses en composante principale
+
+Afin d'étudier des effets probablement influencés par plusieurs de nos
+variables, nous allons chercher à construire de nouvelles grandeurs
+synthétiques que nous pourrions utiliser dans nos analyses statistiques.
+Pour cela, nous allons réaliser deux analyses en composante principale
+(ACP), la première sur les variables impliquées dans la réponses des
+fauvettes à tête noire lors de nos expériences et la seconde sur les
+variables environnementales susceptibles d'avoir un impact sur
+l'activité et donc la réactivité des oiseaux.
+
+#### 1. Variables de réponse
+
+Cette première ACP aura pour but la définition d'une variable
+`REPONSE_GLOBALE` décrite ci-dessus. Pour réaliser cette ACP, nous avons
+choisi les variables continues impliquées dans la réponse des oiseaux,
+c'est à dire cinq des variables disponibles dans notre tableau :
+`DISTANCE_MIN`, `LATENCE`, `CHANT_REPONSE`, `CRIS` et `SURVOLS`.
+
+Tout d'abord, calculons l'ACP et stockons la dans une variable.
+
+```{r ACP_reponse, echo=FALSE}
+ACP_reponse <- data |>
+        dplyr::select(DISTANCE_MIN, LATENCE, CHANT_REPONSE, CRIS, SURVOLS) |>
+        dudi.pca(center = T, scale = T, scannf=FALSE, nf = 2)
+
+p1 <- fviz_screeplot(ACP_reponse, addlabels = TRUE, ylim = c(0, 100)) +
+        labs(x="Composantes", y="Pourcentage expliqué de la variance")
+
+p2 <- fviz_pca_var(ACP_reponse, repel = TRUE) +
+        labs(title="Cercle des corrélations",
+             x=TeX("PC$_1$ (49.3%)"), y=TeX("PC$_2$ (20.1%)"))
+
+grid.arrange(p1, p2, ncol=2)
+rm(p1, p2)
+```
+
+Ici, la PC$_1$ semble expliquer une grande partie de la variance de nos
+données et pourrait alors sembler être une bonne approximation de la
+réactivité des oiseaux. Seulement, nous pouvons aussi remarquer que les
+variables `LATENCE` et `DISTANCE_MIN` sont très corrélées entre elles et
+à la PC$_1$. Ainsi, cela pourrait être simplement sû à la forte
+influence des valeurs "infinies" dont nous parlions plus haut. Pour
+vérifier cela, nous allons de nouveau effectuer une ACP avec les 5 mêmes
+variables, mais cette fois-ci sur les oiseaux qui répondaient aux
+diffusions (`LATENCE_BINAIRE == 1`).
+
+```{r ACP_reponse_reactif, echo=FALSE}
+ACP_reponse_reactif <- data_reponse |>
+        dplyr::select(DISTANCE_MIN, LATENCE, CHANT_REPONSE, CRIS, SURVOLS) |>
+        dudi.pca(center = T, scale = T, scannf=FALSE, nf = 2)
+
+p1 <- fviz_screeplot(ACP_reponse_reactif, addlabels = TRUE, ylim = c(0, 100)) +
+        labs(x="Composantes", y="Pourcentage expliqué de la variance")
+
+p2 <- fviz_pca_var(ACP_reponse_reactif, repel = TRUE) +
+        labs(title="Cercle des corrélations",
+             x=TeX("PC$_1$ (31.2%)"), y=TeX("PC$_2$ (22%)"))
+
+grid.arrange(p1, p2, ncol=2)
+rm(p1, p2)
+```
+
+Cette fois-ci, les corrélations sont moins fortes entre les variables et
+la composante principale, mais notre ACP est maintenant mauvaise car la
+PC$_1$ n'explique plus que $31.2\%$ de la variance des données. Si
+chacune des composante expliquait la même part de variance, alors
+chacune serait associée à $20\%$, soit à peine moins que $31.2\%$.
+
+Nous n'utiliserons donc pas de variable de réponse globale pour étudier
+le comportement des oiseaux étudiés.
+
+#### 2. Variables environnementales
+
+Nous avons ensuite essayé de synthétiser les variables météorologiques
+et autres facteurs environnementaux en réalisant une ACP sur les
+colonnes `ENSOLEILLEMENT`, `TEMPERATURE`, `VENT_MAX`, `VENT_MOY` et
+`PUBLIC`. Nous n'avons pas gardé la variable `PLUIE` car elle est
+seulement intervenu lors de notre premier jour de terrain et qu'elle
+n'avait aucun poids dans les 2 premières composantes de l'ACP.
+
+```{r ACP_weather, echo=FALSE}
+ACP_weather <- data |> dplyr::select(ENSOLEILLEMENT, TEMPERATURE, VENT_MAX,
+                              VENT_MOY, PUBLIC) |>
+        dudi.pca(center = T, scale = T, scannf=FALSE, nf = 2)
+
+# data <- data |> mutate(PC1_WHEATHER = ACP_weather$li$Axis1)
+
+p1 <- fviz_screeplot(ACP_weather, addlabels = TRUE, ylim = c(0, 100)) +
+        labs(x="Composantes", y="Pourcentage expliqué de la variance")
+
+p2 <- fviz_pca_var(ACP_weather, repel = TRUE) +
+        labs(title="Cercle des corrélations",
+             x=TeX("PC$_1$ (48.6%)"), y=TeX("PC$_2$ (24.8%)"))
+
+grid.arrange(p1, p2, ncol=2)
+rm(p1, p2)
+```
+
+On voit ici qu'une part importante de la variance est expliquée par la
+PC$_1$, mais cette dernière n'est pas facilement interprétable comme
+nous pouvons le constater sur le cercle des corrélations. Bien que
+certaines de nos variable sont positivement corrélées avec la PC$_1$
+(`CRIS`, `SURVOLS`...), nous avons préféré ne pas l'utiliser car nous ne
+pouvions pas faire d'interprétation précise de ces résultats.
+
+## II. Diffusion
+
+Dans cette partie, nous allons chercher à répondre à notre problématique
+principale, à savoir :
+
+```{=tex}
+\begin{center}
+\textbf{Quel est l'impact de différents chants d'oiseaux sur le comportement territorial des mâles de fauvette à tête noire ?}
+\end{center}
+```
+Tout d'abord, nous créons un nouveau tableau avec une colonne `STROPHES`
+correspondant aux colonnes `STROPHES_AVANT` et `STROPHES_APRES` de
+`data_reponse` l'une sur l'autre, contenant également une colonne
+désignant à quelle colonne appartenait la ligne de `STROPHES`. Il nous
+permettra de faire des plot avec comme facteur le moment de comptage des
+strophes (avant ou après) et de faire des tests appariés sur cette
+variable. La colonne `ROW` que nous rajoutons sert à identifier le
+numéro de ligne original (dans `data_reponse`) afin de pouvoir faire les
+tests appariés.
+
+```{r tableau_long}
+data_reponse_long <- data_reponse |>
+        mutate(
+                STROPHES_AVANT=STROPHES_AVANT*2,
+               ROW = as.factor(row_number())
+               ) |>
+        gather(
+                key = "AVANT_APRES", value = "STROPHES",
+                STROPHES_AVANT, STROPHES_APRES
+                ) |>
+        convert_as_factor(AVANT_APRES) |>
+        mutate(AVANT_APRES=fct_rev(AVANT_APRES))
+```
+
+### A. Etude de la réaction "binaire"
+
+Pour commencer nos analyse, nous utiliserons tout d'abord la variable
+`LATENCE_BINAIRE` pour étudier la présence ou absence de réponse selon
+la diffusion passée. Nous utilisons une loi de Bernoulli pour modéliser
+la variable `LATENCE_BINAIRE` car elle possède 2 issues chacune observée
+avec une probabilité donnée.
+
+```{r}
+test_latbin_diffusion <- glm(
+        LATENCE_BINAIRE ~ DIFFUSION, family="binomial",
+        data = data
+        )
+
+test_latbin_diffusion |> estimate_contrasts(p_adjust = "fdr") |>
+        add_significance()
+```
+
+```{r}
+table_data_diff <- data |> select(DIFFUSION, LATENCE_BINAIRE) |>
+        table()
+
+table_data_count_n <- table_data_diff |> data.frame() |>
+        group_by(DIFFUSION) |> mutate(N = sum(Freq)) |>
+        filter(LATENCE_BINAIRE == 1) |> select(-LATENCE_BINAIRE) |>
+        rename(REACTION=Freq)
+
+table_data_ci <- table_data_count_n |>
+        with(binom.confint(REACTION, N, methods="wilson")) |>
+        select(x, mean, lower, upper) |>
+        rename(REACTION=x, PROP=mean, LOWER=lower, UPPER=upper)
+
+table_final_bin <- merge(
+        table_data_count_n, table_data_ci, by=c("REACTION")
+        )
+
+data_test <- data.frame(
+        group1 = c("FT_sif","FT_sif"), group2 = c("FG","MC"), p="*",
+        y.position=c(0.85, 0.95)
+        )
+
+ggplot(table_final_bin, aes(x=DIFFUSION, y=PROP)) +
+        geom_col(fill = "#0073C2FF", width = 0.3) +
+        geom_errorbar(aes(ymax = UPPER, ymin = LOWER), width=0.03) +
+        theme_minimal() +
+        labs(
+                title="Proportion de mâles répondant selon le type de diffusion",
+                x="Diffusion", y="Proportion de mâle réagissant"
+                ) +
+        geom_text(
+                aes(label = round(PROP,2)), hjust=1.25,
+                vjust = -1, color = "black"
+                ) +
+        ylim(0,1) +
+        stat_pvalue_manual(data_test, label = "p", tip.length = 0.01)
+        
+rm(table_data_count_n, table_data_ci, data_test)
+```
+
+Les résultats sont significatifs entre les diffusions de sifflements de
+fauvette à tête noire et les chants de mésange charbonières ainsi que
+les chants de fauvette grisette. Or les diffusions de mésanges
+charbonières sont les témoins négatifs de diffusion. Aussi, a priori,
+nous pensions que les fauvettes à tête noire réagiraient moins aux
+chants de mésange charbonière (témoin négatif) et de fauvette grisette,
+ce que nous observons sur le graphique.
+
+### B. Intensité de la réponse
+
+Maintenant, nous voulons tester l'intensité de réponse des oiseaux qui
+réagissaient à la diffusion (utilisation de `data_reponse`). Nous
+discuterons de ces résultats une fois l'ensemble analysé.
+
+#### 1. Effet des diffusions sur le chant des fauvettes à tête noire
+
+##### a. Tests appariés sur le nombre de strophes avant et après la diffusion
+
+###### i. Statistiques descriptives
+
+Tout d'abord, intéressons nous aux valeurs des statistiques des nombres
+de strophes avant et après les différentes diffusions pour étudier
+l'intensité de réaction des fauvettes à tête noire. Nous avons multiplié
+par 2 les strophes avant la diffusion car nous les avons comptées deux
+fois moins longtemps (1 minute 30 avant et 3 minutes après).
+
+```{r stat_descriptives, echo=FALSE}
+data_reponse_long |> group_by(DIFFUSION, AVANT_APRES) |>
+        get_summary_stats(STROPHES, type = "mean_sd") |>
+        dplyr::select(-variable)
+```
+
+Nous voyons que pour tous les groupes (sauf peut-être pour la fauvette
+grisette), il y a une différence de moyenne remarquable. Maintenant,
+nous nous demandons si ces différences sont significatives.
+
+###### ii. Tester l'effet global des diffusions sur le chant
+
+```{r init_alea, include=FALSE}
+# Nous allons utiliser de l'aleatoire dans cette partie :
+set.seed(236265)
+```
+
+Tout d'abord, nous allons effectuer un test global de l'effet. Avant
+d'utiliser un t.test apparié, nous devons vérifier que la distribution
+des moyennes empiriques de la différence testée est normale (ne se fait
+pas en pratique, mais c'est sympathique à réaliser).
+
+On définit d'abord les fonctions de densité associées aux différences de
+comptages de strophes.
+
+```{r density_function}
+density_func <- function(x_val, densite){
+        D <- densite$x
+        if ((D[length(D)] > x_val) & (x_val > D[1])){
+                x_val <- findInterval(x_val, D)
+                y_val <- densite$y[x_val]
+        }else{
+                y_val <- 0
+        }
+        return(y_val)
+}
+
+dens_diff <- density(data_reponse$STROPHES_APRES - data_reponse$STROPHES_AVANT*2)
+```
+
+On cree un `data.frame` pour tracer ces distribution.
+
+```{r preparation_graphique}
+modelo_law <- data.frame(Diff_Strophes=seq(-25,30,0.01)) |>
+        mutate(
+                Densite_Differences =
+                        sapply(
+                                Diff_Strophes,
+                                function(x) density_func(
+                                        x, dens_diff
+                                        )
+                                )
+                )
+```
+
+On regarde ce à quoi ressemble les distributions de notre échantillon.
+
+```{r avant_apres_echantillon, echo=FALSE}
+ggplot(modelo_law, aes(x=Diff_Strophes, y=Densite_Differences)) +
+        geom_line(linewidth=1, color="darkgreen") +
+        geom_ribbon(aes(ymax=Densite_Differences, ymin=0),
+                    alpha=.25, fill="lightgreen") +
+        theme_classic() +
+        labs(
+                x=TeX(
+                        "Strophes$_{après}$ $-$ 2 Strophes$_{avant}$"
+                        ),
+                y="Densité",
+                title="Densité de la différence entre le nombre de strophes\
+               comptées après et avant la diffusion"
+               )
+```
+
+On fait $1000$ fois un échantillonnage de taille égale au nombre de
+données disponibles dans `data_reponse`, soit $205$.
+
+```{r moy_empiriques_avant_apres}
+mean_diff_data <- function(taille_ech){
+        res <- seq(-25,30,0.01) |>
+                sample(
+                        taille_ech, TRUE,
+                        modelo_law$Densite_Differences
+                        ) |>
+                mean()
+        return(res)
+}
+
+moy_emp <- sapply(rep(205, 10000), mean_diff_data) |>
+        data.frame() |> setNames("Distribution")
+```
+
+On trace enfin la distribution des moyennes empiriques du nombre de
+strophes avant et après avoir passé la diffusion.
+
+```{r moy_emp_plot, echo=FALSE}
+ggplot(moy_emp, aes(x=Distribution, y= ..density..)) +
+        geom_histogram(bins=60, color="black", fill="lightgreen") +
+        theme_classic() +
+        labs(
+                x="Moyenne empirique", y="Densité",
+                title=paste(
+                        "Différences du nombre de strophes prononcées",
+                        "avant et après la diffusion"
+                        ),
+                subtitle="Distribution de la moyenne empirique"
+        )
+```
+
+Ainsi, l'utilisation d'un t.test apparié est justifiée car la moyenne
+empirique de `STROPHES_APRES - 2*STROPHES_AVANT` suit bien une loi
+normale grâce à la taille du jeu de données dont nous disposons. Pour le
+t.test apparié, l'homoscédasticité n'est pas supposées donc nous ne la
+testons pas.
+
+```{r paired_t.test, echo=FALSE}
+t.test(data_reponse$STROPHES_APRES, data_reponse$STROPHES_AVANT*2, paired = TRUE)
+data_reponse |> summarise(
+        `Moyenne de après - avant` = mean(CHANT_REPONSE),
+        `Taille de l'effet` = mean(CHANT_REPONSE)/sd(CHANT_REPONSE)
+        )
+```
+
+Il y a donc bien un effet de la diffusion sur le nombre de chant, c'est
+à dire en moyenne environ 2 strophes de plus prononcées après par
+rapport à avant la diffusion. Mais la taille d'effet étant assez faible,
+nous allons maintenant rentrer un peu plus dans les détails.
+
+###### iii. Tester l'effet de chaque type diffusion sur le chant
+
+Pour préciser cet effet, revenons à nos groupes par type de diffusion.
+Avant de faire des tests, représentons nos données.
+
+```{r avant_apres_diff, echo=FALSE}
+ggboxplot(data_reponse_long,
+          x = "DIFFUSION", y = "STROPHES", fill = "AVANT_APRES") +
+        labs(
+                title="Titre à changer", x="Diffusion",
+                y=TeX("Strophes$_{après}$ $-$ 2 Strophes$_{avant}$")
+             ) +
+        theme_classic() +
+        scale_fill_manual(
+                values=c("lightblue", "orange"), name="",
+                labels=c("Avant la diffusion", "Après la diffusion")
+                )
+```
+
+Nous allons faire, après vérification des hypothèses de test, une ANOVA
+sur mesures répétées. Cette ANOVA permet d'apparier les données de
+comptage de strophes avant et après (comme si c'était deux traitements
+différents) et d'étudier la différence entre ces deux groupes selon
+d'autres facteurs, ici un seul, le type de diffusion.
+
+Avant de faire ce modèle, assurons nous que l'hypothèse de normalité des
+résidus est vérifiée. Dans un premier temps, nous réalisons un test de
+Shapiro-Wilk, bien que très stringent...
+
+```{r shapiro_paired, echo=FALSE}
+data_reponse_long |> group_by(DIFFUSION, AVANT_APRES) |>
+        shapiro_test(STROPHES) |> dplyr::select(-variable)
+```
+
+Comme nous pouvions nous attendre, le test conclut à la non normalité de
+nos distributions. Nous représentons alors les qqplot.
+
+```{r qqplot_avant_apres}
+ggqqplot(data_reponse_long, "STROPHES", ggtheme = theme_bw()) +
+        facet_grid(DIFFUSION ~ AVANT_APRES, labeller = "label_value") +
+        theme_bw() +
+        labs(title="QQplot", x="Quantiles théoriques", y="Quantiles observés")
+```
+
+Après cela et sachant que l'ANOVA est relativement robuste à l'hypothèse
+de normalité, nous allons l'utiliser.
+
+```{r paired_anova, echo=FALSE}
+anova_test(data = data_reponse_long, dv = STROPHES, wid = ROW,
+           between=DIFFUSION, within = AVANT_APRES)
+```
+
+On retrouve encore la différence significative entre le comptage avant
+et après du nombre de strophes, et comme il existe une intéraction avec
+le type de diffusion, nous allons décomposer cet effet.
+
+```{r paired_anova_groups,echo=FALSE}
+data_reponse_long |> group_by(DIFFUSION) |>
+        anova_test(dv = STROPHES, wid = ROW, within = AVANT_APRES) |>
+        get_anova_table() |> adjust_pvalue(method = "fdr") |>
+        add_significance()
+```
+
+Ainsi, on retrouve bien un effet significatif de la diffusion (c'est à
+dire une augmentation du nombre de strophes après) pour tous les types
+de diffusions, sauf pour la fauvette grisette et la mésange charbonière.
+
+```{r eff.size, echo=FALSE}
+data_reponse |> group_by(DIFFUSION) |> summarise(
+        `Moyenne de (après - avant)` = mean(CHANT_REPONSE),
+        `Taille de l'effet` = mean(CHANT_REPONSE)/sd(CHANT_REPONSE)
+        )
+```
+
+En ce qui concerne la taille d'effet, nous voyons qu'elle est plus
+grande que ce que nous avions obtenu sans distinguer les types de
+diffusion.
+
+Nous pouvons donc conclure que tous les chants de fauvette à tête noire,
+qu'ils soient complets ou non, et les chants de fauvette des jardins,
+font réagir les fauvettes à tête noire.
+
+La réaction à l'encontre de la fauvette des jardins peut s'expliquer par
+la proximité phylogénétique des deux espèces, la ressemblance de leur
+chant et leurs niches écologiques relativement proches.
+
+Finalement représentons les données en indiquant les différences
+significatives.
+
+On crée d'abord un data.frame contenant les niveaux de significativité.
+
+```{r comput_stat_paired}
+# Cela donne les memes resultats que dans le chunk `paired_anova_groups`
+stat_result_paired <- data_reponse_long |> group_by(DIFFUSION) |>
+        t_test(STROPHES ~ AVANT_APRES, paired=TRUE) |>
+        adjust_pvalue(method = "fdr") |>
+        add_significance() |> add_xy_position(x = "AVANT_APRES")
+```
+
+Et on trace ensuite le graphique.
+
+```{r plot_paired_boxplot, echo=FALSE}
+title <- "Réponse en terme de chant aux différents types de diffusion"
+data_reponse |> mutate(STROPHES_AVANT=STROPHES_AVANT*2) |> ggpaired(cond1="STROPHES_AVANT", cond2="STROPHES_APRES",
+         fill = "condition", line.color = "gray",
+         line.size = 0.4, facet.by = "DIFFUSION") +
+        labs(title=title,
+             x="", y="Nombre de strophes") +
+        theme_bw() + theme(axis.text.x = element_blank(),
+                           axis.ticks.x = element_blank()) +
+        stat_pvalue_manual(stat_result_paired, tip.length = 0) +
+        ylim(0,27) +
+        scale_fill_manual(values=c("lightblue", "orange"),
+                          name="",
+                          labels=c("Avant la diffusion", "Après la diffusion"))
+rm(title)
+```
+
+##### b. Test de l'effet du type de diffusion sur la réponse de type chant
+
+Avant toute chose, demandons-nous si nous pouvons comparer le nombre de
+strophes après diffusion de chaque groupe. Pour cela, il faudrait que
+nous n'observions pas de différence entre le nombre de strophes
+prononcées avant la diffusion. En effet, nous avons randomisé l'ordre de
+diffusion des différents chants et normalement, de telles différences
+devraient être effacées par le hazard, mais compte tenu du nombre de
+répétition de notre expérience et de l'existence de potentiels autres
+biais (le comportement des expérimentateurs avant la diffusion de
+certains chants par exemple, bien que seul la personne en charge de la
+diffusion connaissait cette information en règle générale), nous devons
+vérifier que de telles différences n'existent pas dans notre jeu de
+données.
+
+###### i. Nombre de strophes avant la diffusion
+
+Tout d'abord, regardons s'il y a une différence de nombre de strophes
+avant diffusion selon les types de diffusion.
+
+```{r stat_descr_avant, echo=FALSE}
+ggboxplot(
+        data_reponse, x = "DIFFUSION", y = "STROPHES_AVANT",
+        fill = "lightblue"
+        ) +
+        theme_minimal() +
+        labs(
+                title="Nombre de strophes comptées avant la diffusion",
+                x="Diffusion", y="Nombre de strophes"
+                ) +
+        geom_jitter(width=0.2, color="blue2")
+
+data_reponse |> group_by(DIFFUSION) |>
+        get_summary_stats(STROPHES_AVANT, type = "mean_sd") |>
+        dplyr::select(-variable)
+```
+
+Sur le graphique ci-dessus, il n'est pas évident que le nombre de
+strophes avant diffusion est le même quelque soit le groupe,
+particulièrement pour les deux chants pour lesquels il n'y avait pas de
+réponse à la diffusion, celui de la mésange charbonière et de la
+fauvette grisette.
+
+On cherche d'abord quel modèle utiliser pour nos données de comptage.
+Nous ne reproduirons pas cette recherche systématiquement (sauf en cas
+de résultats différent) afin de raccourcir le rapport, mais il est bon
+de noter que nous l'avons effectué pour chaque test afin d'être sûr de
+la pertinence du modèle statistique que nous utilisions. On commence par
+une régression de Poisson car nous testons des données de comptage :
+
+```{r test_avant, echo=FALSE}
+mod_avant_pois <- glm(
+        STROPHES_AVANT ~ DIFFUSION,
+        data = data_reponse, family="poisson"
+        )
+
+mod_avant_pois |> 
+        performance::check_predictions() |> 
+        plot() +
+        xlim(0, 13) +
+        labs(title="Comparaison de nos données au modèle fitté", subtitle="",
+             x="Nombre de strophes comptées avant la diffusion", y="Compte") +
+        theme_classic()
+
+mod_avant_pois |> 
+        performance::check_overdispersion()
+
+mod_avant_pois |> 
+        performance::check_distribution()
+```
+
+Ici, les prédiction de ce même modèle ne correspondent pas du tout à ce
+que nous avons. Il y a de la surdispersion et nous allons essayer de
+corriger cela en utilisant une régression binomiale négative (de plus,
+la fonction check_distribution nous propose cette distribution comme la
+plus probable).
+
+```{r, echo=FALSE}
+mod_avant_bn <- MASS::glm.nb(
+        STROPHES_AVANT ~ DIFFUSION,
+        data = data_reponse
+        )
+
+mod_avant_bn |> 
+        performance::check_predictions() |> 
+        plot() +
+        xlim(0, 13) +
+        labs(title="Comparaison de nos données au modèle fitté", subtitle="",
+             x="Nombre de strophes comptées avant la diffusion", y="Compte") +
+        theme_classic()
+
+mod_avant_bn |> check_overdispersion()
+```
+
+Cette fois-ci, les prédictions sont bien meilleures et la surdispersion
+a été corrigée. Nous pouvons également réaliser un BIC qui pourrait
+participer à notre prise de décision. Nous l'utilisons sur les deux
+modèles précédents ainsi que sur un modèle de Poisson et un modèle
+binomial négatif zero-inflated.
+
+```{r, echo=FALSE}
+mod_avant_poiszi <- pscl::zeroinfl(
+        STROPHES_AVANT ~ DIFFUSION,
+        data = data_reponse
+        )
+
+mod_avant_nbzi <- pscl::zeroinfl(
+        STROPHES_AVANT ~ DIFFUSION,
+        data = data_reponse, dist="negbin"
+        )
+
+bicP <- mod_avant_pois |> BIC()
+bicPZI <- mod_avant_poiszi |> BIC()
+bicBN <- mod_avant_bn |> BIC()
+bicBNZI <- mod_avant_nbzi |> BIC()
+
+print(
+        paste0(
+                "Le BIC de la régression poissonnienne est de ",
+                as.integer(bicP),
+                " alors que celui de la régression binomiale négative est de ",
+                as.integer(bicBN),
+                ". Aussi, les modèles zero-inflated ne font pas mieux que la régression binomiale négative car ils introduisent des paramètres supplémentaires et sont pénalisés par le BIC. On a ainsi le BIC du modèle de Poisson zero-inflated égal à ",
+                as.integer(bicPZI),
+                " et celui du modèle binomial négatif zero-inflated de ",
+                as.integer(bicBNZI),"."
+                )
+        )
+```
+
+Ici, nous utilisons donc le modèle binomial négatif qui nous donne :
+
+```{r, echo=FALSE}
+mod_avant_bn |> summary()
+
+mod_avant_bn |> estimate_contrasts(p_adjust="fdr") |>
+        add_significance()
+```
+
+D'après les résultats des tests, il n'y a donc pas de différences
+significatives entre les nombres de strophes chantées avant la
+diffusion. Nous comparerons donc directement les nombres de strophes
+chantées après diffusion.
+
+###### ii. Nombre de strophes après la diffusion
+
+Comme précédemment, nous commençons par représenter nos données et
+certaines statistiques classiques (moyenne et équart-type en plus de la
+médiane et des quartiles sur les boxplots).
+
+```{r graphique_reponse_apres, echo=FALSE}
+ggboxplot(data_reponse, x = "DIFFUSION", y = "STROPHES_APRES",
+          fill = "orange") + theme_minimal() +
+        labs(title="Nombre de strophes comptées après la diffusion",
+             x="Diffusion", y="Nombre de strophes") +
+        geom_jitter(width=0.2, color="darkred") +
+        ylim(0,30)
+
+data_reponse |> group_by(DIFFUSION) |>
+        get_summary_stats(STROPHES_APRES, type = "mean_sd") |>
+        dplyr::select(-variable)
+```
+
+```{r, echo=FALSE}
+mod_apres_bn <- MASS::glm.nb(
+        STROPHES_APRES ~ DIFFUSION,
+        data = data_reponse
+        )
+
+mod_apres_bn |> 
+        performance::check_predictions() |> 
+        plot() +
+        xlim(0, 13) +
+        labs(title="Comparaison de nos données au modèle fitté", subtitle="",
+             x="Nombre de strophes comptées après la diffusion", y="Compte") +
+        theme_classic()
+```
+
+Ici encore, nous utilisons la régression binomiale négative qui nous
+donne le meilleur BIC et visiblement de bonnes prédictions.
+
+```{r}
+mod_apres_bn |> BIC()
+mod_apres_bn |> estimate_contrasts(p_adjust = "fdr") |>
+        add_significance()
+```
+
+Ici, aucune différence n'est significative donc nous ne pouvons rien
+conclure, mais nous voyons néanmoins que la p-value est plus faible pour
+la comparaison entre le chant complet de fauvette à tête noire et le
+chant de fauvette grisette. Cela n'est pas très étonnant car
+premièrement, nous n'avons pas beaucoup de données pour chaque
+sous-groupe, et ensuite, ces données étant extrèmement bruitées, il est
+difficile d'en tirer beaucoup d'information.
+
+Afin de faire des hypothèses quant aux résultats que nous pourrions
+obtenir si nous avions plus de données, nous pouvons nous baser sur les
+comparaisons non significatives de notre jeu de données. Ces dernières
+nous indiquent que les fauvettes à tête noire réagissent plus en terme
+de chant à celui de leur espèce ou d'une espèce proche comme la fauvette
+des jardins alors que cette réponse est moins importante voire absente
+face aux mésanges charbonières et aux fauvettes grisettes.
+
+D'ailleurs, ces tendances sont confirmées lorsque nous réalisons un test
+non paramétrique. Etant donné que ces tests sont généralement moins
+puissants que les paramétriques applicables aux données, il nous pose
+question d'obtenir moins de résultats significatifs avec ces derniers...
+Avons nous bien choisi nos modèles ? Est-ce vraiment le "manque de
+données" qui nous limite dans ce cas précis ?
+
+```{r, echo=FALSE}
+kruskal.test(STROPHES_APRES ~ DIFFUSION, data=data)
+dunn_test(STROPHES_APRES ~ DIFFUSION, p.adjust.method = "fdr", data=data)
+```
+
+Avec un modèle mixte, on baisse aussi très légèrement le BIC par rapport
+au précédent, mais les résultats restent très semblable et détectent
+toujours moins de différences que les tests paramétriques.
+
+```{r}
+mod_apres_mixed <- lme4::glmer.nb(STROPHES_APRES ~ DIFFUSION + (1|ID_MALE), data=data_reponse)
+mod_apres_mixed |> BIC()
+mod_apres_bn |> BIC()
+mod_apres_mixed |> estimate_contrasts(p_adjust = "fdr") |> add_significance()
+```
+
+A l'avenir, quand le BIC sera plus élevé, nous utiliserons le modèle
+mixte correspondant.
+
+#### 2. Effet des diffusions sur le nombre de cris
+
+Après avoir étudié le chant réponse aux différentes diffusion, nous nous
+intéressons maintenant à la réponse de type cris. Pour cela, nous ne
+disposons que de la variable `CRIS` qui correspond au nombre de cris
+poussés du début de la diffusion à la fin du temps d'observation (soit 3
+minutes après).
+
+Nous ne testerons alors que le nombre de cris selon le type de
+diffusion.
+
+```{r stat_descriptives_cris, echo=FALSE}
+data_reponse |> group_by(DIFFUSION) |>
+        get_summary_stats(CRIS, type = "mean_sd") |> dplyr::select(-variable)
+
+ggboxplot(data_reponse, x="DIFFUSION", y="CRIS", fill="cyan2") +
+        geom_jitter(width=0.2, color="cyan4") +
+        theme_minimal() +
+        labs(
+                title="Nombre de cris selon le type de diffusion",
+                x="Diffusion", y="Nombre de cris"
+                )
+```
+
+Premièrement, nous voyons dans le tableau que les moyennes ne semblent
+pas suivre le même schéma que dans la section précédente. Nous avons en
+moyenne plus de cris pour les chants hétérospécifiques. De plus, les
+écarts types étant très importants, cela semble peu probable que nous
+observions un effet très net du type de diffusion sur le nombre de cris.
+
+Sur les boxplot ensuite, nous remarquons qu'il y a beaucoup de valeurs
+extrèmes et que les médianes semblent très proches les unes des autres.
+On voit aussi que les médianes de `FG` et `MC` sont un peu plus élevées,
+ainsi que celle de `FJ` dans une moindre mesure.
+
+On modélise encore ces données avec un modèle binomial négatif.
+
+```{r, echo=FALSE}
+mod_cris_bn_mixed <- lme4::glmer.nb(CRIS ~ DIFFUSION + (1|ID_MALE), data=data_reponse)
+
+mod_cris_bn_mixed |> 
+        performance::check_predictions() |> 
+        plot() +
+        xlim(0, 100) +
+        labs(title="Comparaison de nos données au modèle fitté", subtitle="",
+             x="Nombre de cris", y="Compte") +
+        theme_classic()
+```
+
+Encore une fois, ce modèle fait de bonnes prédictions. Regardons les
+résultats qu'il nous donne :
+
+```{r, echo=FALSE}
+mod_cris_bn_mixed |> summary()
+mod_cris_bn_mixed |> estimate_contrasts(p_adjust="fdr") |>
+        add_significance()
+```
+
+Finalement, le nombre de cris n'est signicativement plus grand pour
+aucun groupe. Nous retiendrons tout de même que la tendance pour le
+nombre de cris semblait contraire à celle pour le nombre de chant ce qui
+pourrait indiquer que ce type de réponse est plutôt dirigé de manière
+non spécifique quand l'oiseau est dérangé. Le chant quant à lui réservé
+aux congénères des fauvettes à tête noire jouerait d'avantage un rôle
+dans la réponse territoriale et sexuelle des oiseaux.
+
+#### 3. Effet des diffusions sur le nombre de survols
+
+```{r, echo=FALSE}
+ggboxplot(data_reponse, x="DIFFUSION", y="SURVOLS", fill="orchid1") +
+        theme_minimal() + geom_jitter(color="orchid4", width=0.2) +
+        labs(
+                title="Nombre de survols selon le type de diffusion",
+                x="Diffusion", y="Nombre de survols"
+                )
+
+data_reponse |> group_by(DIFFUSION) |>
+        get_summary_stats(SURVOLS, type = "mean_sd") |> dplyr::select(-variable)
+```
+
+On modélise encore ces données avec un modèle binomial négatif.
+
+```{r, echo=FALSE}
+mod_surv_bn_mixed <- lme4::glmer.nb(SURVOLS ~ DIFFUSION + (1|ID_MALE), data=data_reponse)
+
+mod_surv_bn_mixed |> 
+        performance::check_predictions() |> 
+        plot() +
+        xlim(0, 10) +
+        labs(title="Comparaison de nos données au modèle fitté", subtitle="",
+             x="Nombre de survols", y="Compte") +
+        theme_classic()
+```
+
+Encore une fois, ce modèle fait de bonnes prédictions. Regardons les
+résultats qu'il nous donne :
+
+```{r, echo=FALSE}
+mod_surv_bn_mixed |> summary()
+mod_surv_bn_mixed |> estimate_contrasts(p_adjust="fdr") |>
+        add_significance()
+```
+
+Encore une fois, nous n'avons pas de différence détectée par notre
+modèle, bien que les tests paramétriques nous fassent conclure à des
+différences.
+
+```{r, echo=FALSE}
+kruskal.test(SURVOLS ~ DIFFUSION, data=data)
+dunn_test(SURVOLS ~ DIFFUSION, p.adjust.method = "fdr", data=data)
+```
+
+Avec ces derniers tests, le nombre de survols est significativement plus
+important quand nous passions le chant complet ou les gazoullis de
+fauvette à tête noire par rapport à celui de la fauvette grisette et de
+la mésange charbonière. Nous retrouvons également un résultat similaire
+entre les sifflements de fauvette à tête noire et le chant de la mésange
+charbonière. En revanche, pour ce dernier, si nous nous rapportons au
+tableau de statistiques descriptives, nous remarquons que la différence
+entre les deux groupes et de moins de 0.2 survols, ce qui semble être un
+effet négligeable (sans compter que les deux groupes ont la même médiane
+qui est... nulle).
+
+```{r, echo=FALSE}
+ggboxplot(data_reponse, x="DIFFUSION", y="SURVOLS", fill="orchid1") +
+        theme_minimal() + geom_jitter(color="orchid4", width=0.2) +
+        labs(
+                title="Nombre de survols selon le type de diffusion",
+                x="Diffusion", y="Nombre de survols"
+                ) +
+        geom_bracket(
+                xmin = "FG", xmax = "MC", y.position = 6,
+                label = "",  tip.length = 0,
+                vjust = 0.5
+                ) +
+        geom_bracket(
+                xmin = "FT_comp", xmax = 5.5, y.position = 6.4,
+                label = "**",  tip.length = c(0.01,0.02),
+                vjust = 0.5
+                ) +
+        geom_bracket(
+                xmin = "FT_gaz", xmax = 5.5, y.position = 6.1,
+                label = "**",  tip.length = 0.01,
+                vjust = 0.5
+                ) +
+        geom_bracket(
+                xmin = "FT_sif", xmax = "MC", y.position = 5.5,
+                label = "*",  tip.length = 0.01,
+                vjust = 0.5
+                )
+```
+
+#### 4. Effet de la diffusion sur la distance d'approche minimale
+
+Nous voici maintenant à notre avant dernière variable de réponse : la
+distance minimale d'approche. Avec les survols, elles sont qualifiées
+dans plusieurs articles de "high-risk defense behaviour" contrairement
+au chant et aux cris qui sont des "low-risk defense behaviour". Cela est
+dû au fait qu'il est plus coûteux et que l'oiseau se met plus en danger
+en approchant un intru, rendant plus plausible un affrontement physique
+direct. Tout d'abord, représentons nos données. Pour représenter nos
+données, nous utiliserons cette fois-ci un graphique en tuyaux d'orgues
+car nous avons relevé la distance minimale comme une variable
+qualitative ordinale.
+
+```{r, echo=FALSE}
+ggplot(data_reponse, aes(x=DISTANCE_MIN_FACTOR, fill=DIFFUSION)) +
+        geom_bar() + facet_wrap(~DIFFUSION) + theme_bw() +
+        labs(title="Distances minimales d'approche selon la diffusion passée",
+             x="Classe de distance minimale (m)",
+             y="Compte")
+```
+
+Sur ce graphique, il semble que les 3 panels supérieurs se ressemblent
+beaucoup (ce sont ceux de la diffusion de bande son de fauvette à tête
+noire). Les trois autres ont nettement moins, en nombre et en
+proportion, d'oiseaux se rapprochant à moins de 10 mètres.
+
+Pour tester les différences entre les groupes, comme c'est une variable
+qualitative ordinale, nous utilisons un test non paramétrique : l'ANOVA
+de Kruskal-Wallis suivie d'un test de Dunn.
+
+```{r, echo=FALSE}
+kruskal.test(DISTANCE_MIN_FACTOR ~ DIFFUSION, data=data_reponse)
+dunn_test(
+        DISTANCE_MIN_FACTOR ~ DIFFUSION, p.adjust.method="fdr",
+        data=data_reponse
+        ) |> add_significance() |> dplyr::select(-c(.y.,))
+```
+
+Ainsi, nous obtenons des différences significative (en terme de médiane)
+entre : - FT_comp et FG - FT_comp et MC - FT_sif et MC - FT_gaz et MC
+Avec pour chacune de ces différence, le chant cité en premier lié au
+rapprochement le plus important de l'oiseau. Cela va donc bien dans le
+sens que les fauvettes ont un comportement plus virulent face à leur
+congénère, confirmant ce que rapporte la littérature à ce sujet.
+
+#### 5. Effet de la diffusion sur le temps de latence avant la réponse
+
+```{r, echo=FALSE}
+ggboxplot(data_reponse, x="DIFFUSION", y="LATENCE", fill="#ffed57") +
+        geom_jitter(width=0.2, color="salmon4") +
+        theme_minimal() +
+        labs(title="", x="Diffusion", y="Latence (s)")
+```
+
+Nous voyons peut-être une légère tendance sur ces boxplots (réactions à
+gauches plus lentes qu'à droite), mais cela est très incertain. Nous
+devons réaliser les tests pour nous en convaincre.
+
+Nous avons choisi le modèle avec la même méthode que tout à l'heure.
+
+```{r}
+mod_latence_bn <- MASS::glm.nb(
+        LATENCE ~ DIFFUSION, data = data_reponse
+        )
+
+mod_latence_bn |> 
+        performance::check_predictions() |> 
+        plot() +
+        labs(
+                title="Comparaison de nos données au modèle fitté",
+                subtitle="",
+                x="Temps de latence des oiseaux",
+                y="Compte"
+                ) +
+        theme_classic()
+```
+
+Etant donné que le (meilleur) modèle donne des résultats très peu
+satisfaisants en terme de prédiction, nous préférons ne pas l'utiliser
+et directement faire des tests non paramétriques.
+
+```{r, echo=FALSE}
+kruskal.test(LATENCE ~ DIFFUSION, data=data_reponse)
+dunn_test(
+        LATENCE ~ DIFFUSION, p.adjust.method="fdr",
+        data=data_reponse
+        ) |> add_significance() |> dplyr::select(-c(.y.,))
+```
+
+En terme de moyenne du temps de latence, nous avons donc :
+$FT_{sif} > FT_{comp} > FG > FJ > FT_{gaz} > MC$ Parmis ces
+comparaisons, aucune n'est significative.
+
+#### 6. Interprétation des résultats de la section II.B.
+
+La section 1. nous a montré que les réponses de type chant existaient
+pour les 3 diffusions de fauvette à tête noire et pour la fauvette des
+jardin. Ce type de réponse était d'ailleurs plus important pour le chant
+complet de fauvette à tête noire. Ainsi, cela pourrait traduire le fait
+que le chant est une réponse orientée vers l'intrusion d'individus
+conspécifiques car étant un caractère sexuel des mâles.
+
+Ensuite, pour ce qui est de la réponse de type cris, la tendance
+s'inversait et la réponse était plus forte pour les espèces éloignées
+phylogénétiquement des oiseaux étudiés. En effet, les réponses les plus
+fortes étaient retrouvées chez les mésanges charonières et les fauvettes
+grisette... Cela peut êtrez à la fois dû au fait que lors de la
+diffusion des chants conspécifiques, les oiseaux répondaient en chantant
+et ne criaient pas en même temps. On pourrait alors interpréter les cris
+comme une réponse non spécifique à une perturbation. Cela peut également
+remettre en cause l'utilisation de la mésange charbonière comme témoin
+négatif puisque le chant de ces dernières suscitait de fortes réactions
+de type cris.
+
+En ce qui concerne les réponses physiques (survols et approche), les
+réponses les plus fortes étaient retrouvées pour les enregistrements de
+fauvette à tête noire.
+
+## III. Facteurs confondants
+
+### A. Effet de la réaction de la femelle sur la réponse du mâle
+
+On s'intéresse maintenant à l'effet de la réponse des femelle sur celle
+des mâles.
+
+#### 1. Association entre la "réponse binaire" et la réaction de la femelle
+
+Tout d'abord, il est important de noter que la femelle était détectée
+principalement en présence du mâle.
+
+```{r, echo=FALSE}
+table_data_femelle <- data |> select(FEMELLE, LATENCE_BINAIRE) |>  table()
+
+table_data_count_n <- table_data_femelle |> data.frame() |>
+        group_by(LATENCE_BINAIRE) |> mutate(N = sum(Freq)) |>
+        filter(FEMELLE == 1) |> select(-FEMELLE) |> rename(REACTION=Freq)
+
+table_data_ci <- table_data_count_n |>
+        with(binom.confint(REACTION, N, methods="wilson")) |>
+        select(x, mean, lower, upper) |>
+        rename(REACTION=x, PROP=mean, LOWER=lower, UPPER=upper)
+
+table_final_reponse1 <- merge(
+        table_data_count_n, table_data_ci, by="REACTION"
+        )
+
+ggplot(table_final_reponse1, aes(x=LATENCE_BINAIRE, y=PROP)) +
+        geom_col(fill = "#0073C2FF", width = 0.3) +
+        geom_errorbar(aes(ymax = UPPER, ymin = LOWER), width=0.03) +
+        theme_minimal() +
+        labs(
+                title="Réaction des femelles selon la réaction des mâles",
+                x="Réaction des mâles", y="Proportion de réaction des femelles"
+                ) +
+        geom_text(
+                aes(label = round(PROP,2)), hjust=1.25,
+                vjust = -1, color = "black"
+                ) +
+        ylim(0,1)
+        
+rm(table_data_count_n, table_data_ci)
+```
+
+Ainsi, nous avons $\mathbb{P}_{réponse}(Femelle) = 25\%$, alors que
+$\mathbb{P}_{non-réponse}(Femelle) = 8\%$.
+
+```{r, echo=FALSE}
+table_data_femdiff <- data |> select(FEMELLE, DIFFUSION) |> 
+        table()
+
+table_data_count_n <- table_data_femdiff |> data.frame() |>
+        group_by(DIFFUSION) |> mutate(N = sum(Freq)) |>
+        filter(FEMELLE == 1) |> select(-FEMELLE) |>
+        rename(REACTION=Freq)
+
+table_data_ci <- table_data_count_n |>
+        with(binom.confint(REACTION, N, methods="wilson")) |>
+        select(x, mean, lower, upper) |>
+        rename(REACTION=x, PROP=mean, LOWER=lower, UPPER=upper)
+
+table_final_reponse2 <- merge(
+        table_data_count_n, table_data_ci, by="REACTION"
+        )
+
+ggplot(table_final_reponse2, aes(x=DIFFUSION, y=PROP)) +
+        geom_col(fill = "#0073C2FF", width = 0.3) +
+        geom_errorbar(aes(ymax = UPPER, ymin = LOWER), width=0.03) +
+        theme_minimal() +
+        labs(
+                title="Réaction des femelles selon la réaction des mâles",
+                x="Diffusion", y="Proportion de réaction des femelles"
+                ) +
+        geom_text(
+                aes(label = round(PROP,2)), hjust=1.25,
+                vjust = -1, color = "black"
+                ) +
+        ylim(0,1)
+        
+rm(table_data_count_n, table_data_ci)
+```
+
+```{r}
+glmer(
+        FEMELLE~ DIFFUSION + (LATENCE_BINAIRE|ID_MALE),
+        data = data, family = binomial
+        ) |> estimate_contrasts(p_adjust="fdr") |>
+        add_significance()
+```
+
+Les femelles ne semblent pas réagir différemment selon le type de
+diffusion lorsque l'on corrige pour l'effet de la réponse des mâles.
+Ainsi, les différences que nous pouvions observer sur les précédents
+graphiques proviendraient seulement de la réactivité des mâles. Les
+femelles réagiraient principalement quand les mâles réagissent eux même.
+
+On regarde maintenant l'intensité de la réponse du mâle selon qu'il y
+ait ou non réaction de la femelle.
+
+#### 2. Association de la réaction de la femelle sur le nombre de cris
+
+```{r, echo=FALSE}
+mod_cris_femelle_nb <- lme4::glmer.nb(
+        CRIS ~ as.factor(FEMELLE)+DIFFUSION+(1|ID_MALE),
+        data = data_reponse
+        )
+
+mod_cris_femelle_nb |> summary()
+```
+
+```{r}
+ggboxplot(data_reponse, x="FEMELLE", y="CRIS", fill="cyan2") +
+        facet_wrap(~DIFFUSION) + geom_jitter(width=0.2, color="cyan4") +
+        theme_minimal() +
+        labs(
+                title="Nombre de cris selon le type de diffusion",
+                x="Réaction d'une femelle", y="Nombre de cris"
+                )
+```
+
+Cela ne donne aucun résultat significatif et il faut se méfier du
+boxplot ci-dessus qui pourrait nous laisser penser à de petites
+tendances pour certaines espèces (`MC`, `FG`) mais cela n'est du qu'au
+faible nombre de données.
+
+#### 3. Association de la réaction de la femelle sur la réaction de type chant
+
+```{r, echo=FALSE}
+mod_apres_femelle_nb <- lme4::glmer.nb(
+        STROPHES_APRES ~ as.factor(FEMELLE)+DIFFUSION+
+                (1|ID_MALE),
+        data = data_reponse
+        )
+
+mod_apres_femelle_nb |> summary()
+```
+
+```{r}
+ggboxplot(data_reponse, x="FEMELLE", y="STROPHES_APRES", fill="cyan2") +
+        facet_wrap(~DIFFUSION) + geom_jitter(width=0.2, color="cyan4") +
+        theme_minimal() +
+        labs(
+                title="Nombre de cris selon le type de diffusion",
+                x="Réaction d'une femelle",
+                y="Nombre de strophes après diffusion"
+                )
+```
+
+Encore une fois, aucun résultat.
+
+#### 4. Association de la réaction de la femelle sur le nombre de survols
+
+```{r, echo=FALSE}
+mod_survols_femelle_nb <- MASS::glm.nb(
+        SURVOLS ~ as.factor(FEMELLE)+DIFFUSION,
+        data = data_reponse
+        )
+
+mod_survols_femelle_nb |> summary()
+
+mod_survols_femelle_nb |> estimate_contrasts(
+        contrast=c("DIFFUSION","FEMELLE"), p_adjust = "fdr"
+        ) |> add_significance()
+```
+
+Ici, on a une significativement plus de survols lorsque la femelle est
+présente quelque soit la diffusion passée (pour une diffusion donnée, on
+ne compare que avec et sans femelle) !
+
+```{r}
+stat_femelle_surv <- stat_result_paired |>
+        mutate(
+                .y.="SURVOLS", group1=0, group2=1, y.position=6,
+                p.adj.signif="*", groups=list(c(0,1), c(0,1), c(0,1), c(0,1), c(0,1), c(0,1))
+                ) |>
+        select(-c(n1, n2, statistic, p, p.adj, df))
+
+ggboxplot(data_reponse, x="FEMELLE", y="SURVOLS", fill="cyan2") +
+        facet_wrap(~DIFFUSION) + geom_jitter(width=0.2, color="cyan4") +
+        theme_minimal() +
+        labs(
+                title="Nombre de cris selon le type de diffusion",
+                x="Réaction d'une femelle", y="Nombre de survols"
+                ) +
+        stat_pvalue_manual(stat_femelle_surv, tip.length = 0)
+```
+
+### B. Réponse en fonction des jours
+
+Tout d'abord, nous regardons s'il y a des jours où les oiseaux
+réagissent plus ou moins aux diffusions.
+
+```{r}
+table_data_jour <- data |> select(JOUR, ANNEE, LATENCE_BINAIRE) |>  table()
+
+table_data_count_n <- table_data_jour |> data.frame() |>
+        group_by(JOUR, ANNEE) |> mutate(N = sum(Freq)) |>
+        filter(LATENCE_BINAIRE == 1) |> select(-LATENCE_BINAIRE) |>
+        rename(REACTION=Freq)
+
+table_data_ci <- table_data_count_n |>
+        with(binom.confint(REACTION, N, methods="wilson")) |>
+        select(x, mean, lower, upper) |>
+        rename(REACTION=x, PROP=mean, LOWER=lower, UPPER=upper) |>
+        mutate(ANNEE=c(rep(2023,4),rep(2024,4)), JOUR=rep(1:4,2))
+
+table_final_jour <- merge(
+        table_data_count_n, table_data_ci, by=c("JOUR","REACTION", "ANNEE")
+        )
+
+ggplot(table_final_jour, aes(x=JOUR, y=PROP)) +
+        geom_col(fill = "#0073C2FF", width = 0.3) +
+        geom_errorbar(aes(ymax = UPPER, ymin = LOWER), width=0.03) +
+        theme_minimal() +
+        labs(
+                title="Réaction des mâles selon le jour",
+                x="Jours", y="Proportion de réaction des mâles"
+                ) +
+        geom_text(
+                aes(label = round(PROP,2)), hjust=1.25,
+                vjust = -1, color = "black"
+                ) +
+        ylim(0,1) + facet_wrap(~ANNEE)
+        
+rm(table_data_count_n, table_data_ci)
+```
+
+On voit sur le graphique qu'en 2024, nous avons plus d'oiseaux répondant
+le premier jour. En revanche, en 2023, après un premier jour fructueux,
+ils ont chuté dans les réponses puis sont remontés linéairement. On
+teste donc cela sachant que les intervalles de confiance semblaient se
+recouvrir, particulièrement pour l'année 2023.
+
+```{r, echo=FALSE}
+modele_jour <- glm(LATENCE_BINAIRE~JOUR+ANNEE, data=data, family="binomial")
+
+modele_jour |> summary()
+modele_jour |> estimate_contrasts(
+        contrast=c("JOUR","ANNEE"),
+        p_adjust="fdr"
+        ) |> add_significance()
+```
+
+Ensuite, on veut tester l'effet du jour sur l'intensité de la réponse,
+donc on utilise les données des oiseaux ayant répondu.
+
+```{r, echo=FALSE}
+# Effet jour sur la distance minimale
+ggplot(data_reponse, aes(x=DISTANCE_MIN_FACTOR, fill=JOUR)) +
+        geom_bar() + facet_wrap(vars(ANNEE, JOUR), nrow=2) + theme_bw() +
+        labs(
+                title="Distances minimales d'approche selon la diffusion passée",
+                x="Classe de distance minimale (m)",
+                y="Compte"
+             )
+
+# Effet jour sur la latence
+ggplot(data_reponse, aes(x=JOUR, y=LATENCE)) +
+        geom_boxplot(fill="#ffed57") +
+        geom_jitter(width=0.2, color="salmon4") +
+        labs(
+                x="Jour", y="Latence de réponse",
+                title = "Effet Jour sur la latence"
+                ) +
+        theme_minimal() + facet_wrap(~ANNEE)
+
+# Effet jour sur les chants
+ggplot(data_reponse, aes(x=JOUR, y=STROPHES_APRES)) +
+        geom_boxplot(fill="orange") + geom_jitter(width=0.2, color="darkred") +
+        labs(
+                x="Jour", y="Nombre de strophes après diffusion",
+                title = "Effet Jour sur les chants"
+                )+
+        theme_minimal() + facet_wrap(~ANNEE)
+
+# Effet jour sur les cris
+ggplot(data_reponse, aes(x=JOUR, y=CRIS)) +
+        geom_boxplot(fill="cyan2") + geom_jitter(width=0.2, color="cyan4") +
+        labs(
+                x="Jour",y="Nombre de cris",
+                title = "Effet Jour sur les cris"
+             ) +
+        theme_minimal() + facet_wrap(~ANNEE)
+
+#Effet jour sur les survols
+ggplot(data_reponse, aes(x=JOUR, y=SURVOLS)) +
+        geom_boxplot(fill="orchid1") + geom_jitter(width=0.2, color="orchid4") +
+        labs(
+                x="Jour", y="Nombre de survols",
+                title = "Effet Jour sur les survols"
+                ) + theme_minimal() + facet_wrap(~ANNEE)
+```
+
+On ne semble pas observer de tendance d'atténuation de l'intensité de la
+réponse ni d'accoutumance des oiseaux avec le temps.
+
+### C. Réponse de chacun des mâles
+
+Nous regardons si certains mâles répondent plus que d'autres.
+
+```{r}
+table_data_male <- data |> select(ID_MALE, LATENCE_BINAIRE) |>  table()
+
+table_data_count_n <- table_data_male |> data.frame() |>
+        group_by(ID_MALE) |> mutate(N = sum(Freq)) |>
+        filter(LATENCE_BINAIRE == 1) |> select(-LATENCE_BINAIRE) |>
+        rename(REACTION=Freq)
+
+table_data_ci <- table_data_count_n |>
+        with(binom.confint(REACTION, N, methods="wilson")) |>
+        select(x, mean, lower, upper) |>
+        rename(REACTION=x, PROP=mean, LOWER=lower, UPPER=upper) |>
+        mutate(ID_MALE=1:11)
+
+table_final_male <- merge(
+        table_data_count_n, table_data_ci, by=c("ID_MALE", "REACTION")
+        )
+
+table_final_male$ID_MALE <- fct_reorder(
+        table_final_male$ID_MALE, table_final_male$PROP, .desc = TRUE
+        )
+
+ggplot(table_final_male, aes(x=ID_MALE, y=PROP)) +
+        geom_col(fill = "#0073C2FF", width = 0.3) +
+        geom_errorbar(aes(ymax = UPPER, ymin = LOWER), width=0.03) +
+        theme_minimal() +
+        labs(
+                title="Pourcentage du temps où les individus réagissent",
+                x="Mâles", y="Proportion de réaction"
+                ) +
+        geom_text(
+                aes(label = round(PROP,2)), hjust=1.25,
+                vjust = -1, color = "black"
+                ) +
+        ylim(0,1)
+        
+rm(table_data_count_n, table_data_ci)
+```
+
+Après avoir testé la réponse binaire des différents mâle, on cherche à
+tester l'intensité de leurs réponses. Pour cela, on utilise les données
+des oiseaux ayant répondu, donc le tableau `data_reponse`.
+
+```{r}
+# Effet male sur la distance
+ggplot(data_reponse) +
+        geom_boxplot(aes(x=factor(ID_MALE,c(1:11)), y=DISTANCE_MIN)) +
+        labs(x="Mâle",title = "Effet mâle sur la distance") +
+        theme_minimal()
+
+ggplot(data_reponse, aes(x=DISTANCE_MIN_FACTOR, fill=ID_MALE)) +
+        geom_bar() + facet_wrap(~ID_MALE, ncol=5) + theme_bw() +
+        labs(
+                title="Distances minimales d'approche selon la diffusion passée",
+                x="Classe de distance minimale (m)",
+                y="Compte"
+             )
+
+# Effet male sur la latence
+ggplot(data_reponse, aes(x=ID_MALE, y=LATENCE)) +
+        geom_boxplot() + geom_jitter(width=0.2) +
+        labs(x="Mâle",title = "Effet mâle sur la latence") +
+        theme_minimal()
+
+# Effet male sur les chants
+ggplot(data_reponse, aes(x=ID_MALE, y=STROPHES_APRES)) +
+        geom_boxplot() + geom_jitter(width=0.2) +
+        labs(x="Mâle",title = "Effet mâle sur les chants") +
+        theme_minimal()
+
+# Effet male sur les cris
+ggplot(data_reponse, aes(x=ID_MALE, y=CRIS)) +
+        geom_boxplot() + geom_jitter(width=0.2) +
+        labs(x="Mâle",title = "Effet mâle sur les cris") +
+        theme_minimal()
+
+# Effet male sur les survols
+ggplot(data_reponse, aes(x=ID_MALE, y=SURVOLS)) +
+        geom_boxplot() + geom_jitter(width=0.2) +
+        labs(x="Mâle",title = "Effet mâle sur les survols") +
+        theme_minimal()
+```
+
+On observe des disparités de réponse entre les mâles, mais on n'observe
+pas de mâle qui répondrait considérablement plus ou moins que les autres
+sur tous les critères d'activité. Les disparités semblent plutôt
+aléatoirement distribuées parmi les mâles et les critères d'activité. On
+cherche maintenant à tester statistiquement ces différences.
+
+#### 1. Test statistique de l'effet mâle sur les cris
+
+```{r, echo=FALSE}
+test_male_cris_bn <- MASS::glm.nb(
+        CRIS~ID_MALE, data=data_reponse
+        )
+test_male_cris_bn |> summary()
+
+test_male_cris_bn |> estimate_contrasts(p_adjust="fdr") |>
+        add_significance()
+```
+
+On observe que quasiment tous les mâles sont statistiquement différents
+les uns des autres en ce qui concerne le nombre de cris.
+
+#### 2. Test statistique de l'effet mâle sur les chants
+
+```{r}
+test_male_chant <- MASS::glm.nb(
+        STROPHES_APRES~ID_MALE, data=data_reponse
+        )
+test_male_chant |> summary()
+
+test_male_chant |> estimate_contrasts(p_adjust="fdr") |>
+        add_significance()
+```
+
+On observe que la plupart des mâles sont statistiquement différents les
+uns des autres en ce qui concerne le nombre de chants également. De
+plus, le calcul du pseudo-R$^2$ nous permet d'observer que l'effet mâle
+explique $\sim 70\%$ de la variance des chants, ce qui est non
+négligable.
+
+#### 3. Test statistique de l'effet mâle sur les survols
+
+```{r}
+test_male_survols <- MASS::glm.nb(
+        SURVOLS~ID_MALE, data=data_reponse
+        )
+test_male_survols |> summary()
+
+test_male_survols |> estimate_contrasts(p_adjust="fdr") |>
+        add_significance()
+```
+
+On observe que aucun mâle n'est différent des autres en ce qui concerne
+le nombre de survols.
+
+#### 4. Test statistique de l'effet mâle sur la latence
+
+```{r, echo=FALSE}
+kruskal.test(LATENCE~ID_MALE, data=data_reponse)
+dunn_test(
+        LATENCE~ID_MALE,
+        data=data_reponse,
+        p.adjust.method = "fdr"
+        ) |> add_significance() |> select(-c(.y.,p))
+```
+
+Il n'y a pas de mâle différent d'un autre en terme de latence non plus.
+
+#### 5. Test statistique de l'effet mâle sur la distance à l'enceinte
+
+```{r, echo=FALSE}
+kruskal.test(DISTANCE_MIN_FACTOR~ID_MALE, data=data_reponse)
+dunn_test(
+        DISTANCE_MIN_FACTOR~ID_MALE,
+        data=data_reponse,
+        p.adjust.method = "fdr"
+        ) |> add_significance() |> select(-c(.y.,p))
+```
+
+On observe que quelques mâles sont statistiquement différents les uns
+des autres en ce qui concerne la distance d'approche.
+
+On peut conclure de ces tests statistiques que l'effet mâle est un
+facteur important de la variance de l'intensité de la réponse des
+oiseaux. Certains mâles poussent plus de cris, d'autres chantent plus et
+ont plus ou moins tendance à se rapprocher et à survoler l'enceinte.
+
+Cela explique pourquoi le BIC a peu pénalisé les modèles mixtes
+ci-dessus, ces derniers prenant en compte un facteur entrant en jeu dans
+la variance de nos résultats.
+
+### D. Etude des effets de l'environnement sur la réponse des mâles FTN
+
+Nous allons tout d'abord nous intéresser à l'évolution des paramètres environnementaux en fonction du temps pour chaque jour de terrain.
+
+NB : toutes les données météo ont été récoltées sur le site : infoclimat.fr
+
+#### 1. Température
+
+Nous représentons d'abord l'évolution de la température en fonction du temps.
+
+```{r, echo=FALSE}
+temps_pause <- hms("12:30:00")
+
+ggplot(data, aes(x = HEURE, y = TEMPERATURE)) +
+        geom_line(aes(color = JOUR), linewidth=1) +
+        geom_point(
+                aes(shape=as.factor(LATENCE_BINAIRE)),
+                size=2
+                ) +
+        geom_vline(
+                xintercept = temps_pause,
+                linetype = "dashed",
+                color = "red"
+                ) +
+        labs(
+                x = "Heure",
+                y = "Température (°C)",
+                color = "Jour",
+                title = "Réponse - Température"
+             ) +
+        theme_classic() +
+        scale_shape_manual(values = c(1,19), guide = "none") +
+        facet_wrap(~ANNEE)
+```
+
+Nous voyons bien que la température augmente au cours de la journée. En revanche, il est compliqué de conclure quant à la proportion de réponses par rapport au nombre d'observations avec ce graphique...
+
+#### 2. Ensoleillement
+
+On s'intéresse maintenant à l'ensoleillement.
+```{r, echo=FALSE}
+ggplot(data, aes(x = HEURE, y = ENSOLEILLEMENT)) +
+        geom_smooth(aes(color = JOUR), se=FALSE) +
+        geom_point(
+                aes(shape=as.factor(LATENCE_BINAIRE)), size=1.5
+                ) +
+        geom_vline(
+                xintercept = temps_pause, linetype = "dashed",
+                color = "red"
+                ) +
+        labs(
+                x = "Heure", y = "Ensoleillement",
+                color = "Jour",
+                title = "Réponse - Ensoleillement"
+             ) +
+        theme_classic() +
+        facet_wrap(~JOUR) +
+        scale_shape_manual(values = c(1,19)) +
+        theme(legend.position = "none") +
+        facet_wrap(vars(ANNEE, JOUR), ncol=4)
+```
+
+
+#### 3. Vent
+
+Nous avons deux variables, mais étant donné que `VENT_MAX` est parfaitement corrélée à `VENT_MOY` mais plus bruitées, nous garderons seulement la seconde.
+
+```{r, echo=FALSE}
+ggplot(data, aes(x = HEURE, y = VENT_MOY)) +
+        geom_smooth(
+                aes(color = as.factor(JOUR)),
+                linewidth=0.75, se=FALSE
+                ) +
+        geom_point(
+                aes(shape=as.factor(LATENCE_BINAIRE)), size=1.5
+                ) +
+        geom_vline(
+                xintercept = temps_pause, linetype = "dashed",
+                color = "red"
+                ) +
+        labs(
+                x = "Heure", y = "Vent (moy)", color = "Jour",
+                title = "Réponse - Vents moy"
+             ) +
+        theme_classic() +
+        scale_shape_manual(values = c(1,19)) +
+        facet_wrap(~JOUR) +
+        theme(legend.position="none") +
+        facet_wrap(vars(ANNEE, JOUR), ncol=4)
+```
+
+#### 4. Pluie
+
+Il n'a plu que mardi 9 avril 2024 matin et le premier jour d'observation de 2023, donc on trace l'évolution des précipitations uniquement pour ces jours là.
+Etant donne que nous n'avons qu'un seul jour de précipitations par année dans nos données, nous avons décidé de négliger cette variable dans nos analyses.
+
+```{r, echo=FALSE}
+plot1 <- data |> filter(JOUR==1, ANNEE==2023) |>
+        ggplot(aes(x = HEURE, y = PLUIE)) +
+        geom_point(
+                aes(shape=as.factor(LATENCE_BINAIRE)), size=2
+                ) +
+        geom_vline(
+                xintercept = temps_pause, linetype = "dashed",
+                color = "red"
+                ) +
+        labs(
+                x = "Heure", y = "Pluie"
+             ) +
+        theme_classic() +
+        scale_shape_manual(values = c(1,19), guide="none") +
+        facet_wrap(~ANNEE)
+
+plot2 <- data |> filter(JOUR==1, ANNEE==2024) |>
+        ggplot(aes(x = HEURE, y = PLUIE)) +
+        geom_point(
+                aes(shape=as.factor(LATENCE_BINAIRE)), size=2
+                ) +
+        geom_vline(
+                xintercept = temps_pause, linetype = "dashed",
+                color = "red"
+                ) +
+        labs(
+                x = "Heure", y = "Pluie"
+             ) +
+        theme_classic() +
+        scale_shape_manual(values = c(1,19), guide="none") +
+        facet_wrap(~ANNEE)
+
+grid.arrange(plot1, plot2)
+rm(plot1, plot2)
+```
+
+En plus des données météo, d'autres facteurs environnementaux peuvent être étudiés comme le passage du public pendant nos observations sur les différents territoires, mais aussi l'effet de l'heure de la journée.
+
+#### 5. Passage du public
+```{r, echo=FALSE}
+ggplot(data, aes(x = HEURE, y = PUBLIC, color = JOUR)) +
+        geom_col() +
+        geom_point() +
+        labs(
+                x = "Heure", y = "Public", color = "Jour",
+                title = "Passage du public en fonction du temps"
+                ) +
+        theme_classic() +
+        facet_wrap(vars(ANNEE, JOUR), ncol=4) +
+        theme(legend.position = "none")
+```
+
+2024 : Un résultat plutôt logique et cohérent avec ce que l'on a observé sur le terrain : il y a plus de passages sur l'intervalle [10h;16h] dans le parc, que tôt le matin et en fin de journée.
+2023 : une valeur abérrante à 100 pour le dénombrement du public, mais même tendance qu'en 2024.
+
+C'est la seule conclusion que l'on peut tirer de ce graphique.
+Il peut aussi être intéressant de regarder pour quels territoires il y avait le plus de passages, pour déceler un éventuel biais d'analyse :
+
+```{r, echo=FALSE}
+ggplot(data, aes(x = ID_MALE, y = PUBLIC)) +
+        geom_boxplot(outliers=FALSE) +
+        labs(x = "Mâles", y = "Public",
+             title = "Passage du public en fonction des territoires") +
+        theme_bw() +
+        geom_jitter(
+                aes(y = PUBLIC),
+                data=data[data$PUBLIC<35,],
+                width=0.1
+                )
+```
+
+2024 : les territoires où il y avait le plus de passage étaient les territoires 1 et 3. On s'attend à voir un effet plus important pour ces mâles (s'il y en a un).
+2023 : on décèle un peu plus de passage pour les territoires 6, 10 et 11. On s'attend à voir un effet plus important pour ces mâles (s'il y en a un).
+
+#### 6. Analyse statistique de l'effet de l'environnement sur différentes variables
+
+On commence par tester la variable `LATENCE_BINAIRE`.
+
+```{r, echo=FALSE}
+glm_bin_environnement <- glm(
+        LATENCE_BINAIRE ~ TEMPERATURE * ENSOLEILLEMENT *
+                HEURE * PUBLIC * VENT_MOY,
+        data, family="binomial"
+        )
+
+summary(glm_bin_environnement)
+```
+
+D'après notre modèle, `VENT_MOY` a un effet significatif sur `LATENCE_BINAIRE`. Il la diminue.
+
+Maintenant que l'on a testé l'effet de l'environnement sur `LATENCE_BINAIRE`, donc sur la présence ou non des FTN, nous allons étudier leur effet sur l'intensité de réponse.
+
+On commence par étudier l'effet de la température sur chaque type de réponse.
+
+##### a. Effet sur le nombre de strophes
+
+```{r, warning=FALSE, echo=FALSE}
+glm_chant_environnement <- MASS::glm.nb(
+        STROPHES_APRES ~ TEMPERATURE * ENSOLEILLEMENT *
+                HEURE * PUBLIC * VENT_MOY,
+        data_reponse
+        )
+
+summary(glm_chant_environnement)
+```
+
+Ici, on a aucun effet détecté par notre modèle des variables environnementales sur le chant des FTN.
+
+##### b. Effet sur le nombre de cris
+
+```{r, warning=FALSE, echo=FALSE}
+glm_cris_environnement <- MASS::glm.nb(
+        CRIS ~ TEMPERATURE * ENSOLEILLEMENT *
+                HEURE * PUBLIC * VENT_MOY,
+        data_reponse
+        )
+
+summary(glm_cris_environnement)
+```
+
+Même chose pour le nombre de cris.
+
+##### c. Effet sur le nombre de survols
+
+```{r, warning=FALSE, echo=FALSE}
+glm_surv_environnement <- MASS::glm.nb(
+        SURVOLS ~ TEMPERATURE * ENSOLEILLEMENT *
+                HEURE * PUBLIC * VENT_MOY,
+        data_reponse
+        )
+
+summary(glm_surv_environnement)
+```
+
+Et même chose pour le nombre de survols.
+
+Ainsi, nous pouvons dire que d'après nos modèles, nous n'avons pas d'effet des variables environnementales sur nos données.
+
+
+

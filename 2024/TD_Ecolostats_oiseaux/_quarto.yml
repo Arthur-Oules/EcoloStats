@@ -1,0 +1,20 @@
+editor: source
+echo: true
+include: true
+message: false
+warning: false
+
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc-title: Sommaire
+    toc-location: left
+    code-tools:
+      source: false
+    code-fold: true
+    code-summary: Afficher le code
+    code-copy: true
+    link-external-newwindow: true
+    link-external-icon: true
+    lang: fr

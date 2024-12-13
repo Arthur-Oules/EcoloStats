@@ -1,0 +1,43 @@
+---
+title: "Génération des chants à diffuser"
+author: "Arthur Oulès"
+date: "2024-04-08"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(vctrs)
+```
+
+# Création d'un enregistrement à diffuser à partir de strophes extraites
+
+```{r}
+Strophes <- paste("Strophe", as.character(seq(1, 16, 1)))
+
+Chant <- sample(Strophes)
+
+Silences <- sample(seq(2.5, 4, .5), 16, replace = TRUE)
+
+Sequence <- vctrs::vec_interleave(Chant, as.character(Silences))
+```
+
+# Construction du plan d'échantillonnage
+
+```{r}
+Types_son <- c("FTN_Comp", "FTN_Gaz", "FTN_sif", "FG", "FJ", "PM") |>
+  map(\(x) paste(x, as.character(seq(1, 4, 1)))) |> unlist()
+
+N_male <- 4
+
+males <- paste("Male", as.character(seq(1, N_male, 1)), sep = "_")
+
+L_plan <- length(Types_son)
+
+sampling_plan <- males |>
+  lapply(
+    \(x) sample(Types_son, L_plan) |> replicate(2, expr = _) |> c()
+  ) |>
+  as.data.frame(col.names = males)
+```
+

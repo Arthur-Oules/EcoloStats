@@ -1,0 +1,892 @@
+---
+title: "**Analyse de données de structure forestière dans le bois de Montrond**"
+author: "Marie"
+output: 
+  prettydoc::html_pretty:
+    theme: architect
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include = TRUE, message = FALSE, warning = FALSE, error = FALSE)
+```
+
+```{r}
+library(here)
+library(tidyverse)
+library(readxl)
+```
+
+```{r}
+source(here("functions", "plot_functions.R"))
+source(here("functions", "tidy_functions.R"))
+```
+
+Décrire des choses simples : explorer davantage
+le peuplement
+quelles espèces, espèces dominantes 
+jeunes arbres, grands arbres, hauteur ?
+Couverture au sol (diametre des arbres → aire)
+Forme des distributions de diamètre (j inversé classique) : toutes espèces ensemble ou pour une espèce donnée
+Puis seulement analyse multivariée
+
+Lecture des données (au format google sheet l'an dernier)
+
+```{r}
+dataArbre <- paste0("Placette ", 1:17) |> 
+  (\(x) c(paste0(x, ".", 1), paste0(x, ".", 2)))() |> 
+  discard(
+    \(x) x %in% c("Placette 13.1", "Placette 13.2",
+                  "Placette 15.1", "Placette 15.2")
+  ) |>
+    lapply(
+    \(placette) {
+      d <- read_xlsx(
+        path  = here("data", "TP d'Écologie.xlsx"),
+        sheet = placette,
+        skip  = 13,
+        n_max = 21
+      )
+      d$Sousplacette <- placette
+      d$Placette     <- gsub("*\\..", "", placette)
+      d$Placette     <- gsub("Placette ", "P", d$Placette)
+      d$Sousplacette <- gsub(".*\\.", "SP", placette)
+      d
+    }
+  ) |>
+  bind_rows() |>
+  select(-`Sous-placette`)
+
+colnames(dataArbre) <- c(
+  "Espece",
+  "25-34", "35-44", "45-54", "55-64", "65-74",
+  "75-84", "85-94", "95-104", "105-114", "115-124",
+  "Autre", "Hauteur_Dominante_(m)",
+  "Taille_sup_1", "Taille_sup_2", "Taille_sup_3",
+  "Taille_sup_4", "Taille_sup_5", "Taille_sup_6", 
+  "Notes", "Placette", "Sous_placette"
+)
+
+dataArbre |> write_csv(file = here("output", "formated_data.csv"))
+```
+
+
+```{r}
+dataArbre <- read_csv(file = here("output", "formated_data.csv"))
+```
+
+Lecture des caractéristiques des placettes (avec annotation "à la main" des BDP, MDP, HDP et de l'orientation "S" et "N")
+
+```{r}
+
+```
+
+# Etude du nombre d'arbres par placette, par topologie et par orientation
+
+Des diamètres d'arbres ont été mesurés dans les différentes placettes. Le nombre d'arbres mesurés est assez homogène par placette
+
+```{r}
+dataArbre$Placette <- factor(dataArbre$Placette, levels = paste0("P", 1:17))
+
+dataArbre |> hist_row_sum(Placette)
+```
+
+On regarde par espèces d'arbre
+
+```{r}
+dataArbre |> hist_row_sum(Espece) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+```
+
+On regarde par espèces d'arbre et par placette
+
+```{r}
+nb_by_placette <- dataArbre |> hist_row_sum2(Espece, Placette)
+nb_by_placette
+nb_by_placette |> ggsave(
+  file   = here("output", "nb_by_placette.pdf"),
+  width  = 30,
+  height = 20,
+  units  = "cm"
+)
+rm(nb_by_placette)
+```
+
+On regarde par type d'exposition. Pour cela il faut déjà récupérer l'exposition par placette.
+
+```{r}
+dataArbre |>
+  Placette_join() |>
+  hist_row_sum2(Espece, Versant) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+```
+
+On regarde par type de topologie 
+
+```{r}
+dataArbre |>
+  Placette_join() |>
+  hist_row_sum2(Espece, Topo) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+```
+
+
+
+regarder par type de topologie et exposition
+
+```{r}
+nb_by_sp_expo_topo <- dataArbre |>   
+  Placette_join() |>
+  hist_row_sum3(Espece, Topo, Versant)
+
+nb_by_sp_expo_topo
+
+nb_by_sp_expo_topo |> ggsave(
+  file   = here("output", "nb_by_sp_expo_topo.pdf"),
+  width  = 30,
+  height = 20,
+  units  = "cm"
+)
+
+rm(nb_by_sp_expo_topo)
+```
+
+# Etude du nombre d'espèces
+
+```{r}
+species_count <- dataArbre |>
+  mutate(Espece = as.factor(Espece)) |>
+  mutate(Placette = as.factor(Placette)) |> 
+  # Placette_join() |>
+  rowwise(Espece) |> 
+  mutate(Somme = sum(c_across(`25-34`:`115-124`))) |> 
+  filter(Somme != 0) |> 
+  group_by(Placette) |> 
+  count(Placette) |>
+  Placette_join()
+```
+
+
+```{r}
+N_sp_placette_plot <- species_count |>
+  ggplot(aes(x = Placette, y = n)) +
+    geom_col() +
+    labs(
+      title = "Nombre d'espèces par placettes",
+      y     = "Nombre d'espèces"
+    ) +
+    theme_bw()
+
+N_sp_placette_plot
+
+N_sp_placette_plot |> ggsave(
+  filename = here("output", "N_sp_placette_plot.pdf"),
+  plot     = _,
+  height   = 10,
+  width    = 15
+)
+```
+
+
+```{r}
+N_sp_placette_versant_topo_plot <- species_count |>
+  ggplot(aes(x = Placette, y = n)) +
+    geom_col() +
+    labs(
+      title = "Nombre d'espèces par placettes séparées par versant et topographie",
+      y     = "Nombre d'espèces"
+    ) +
+    theme_bw() +
+    facet_grid(
+      rows = vars(Versant),
+      cols = vars(Topo)
+    )
+
+N_sp_placette_versant_topo_plot
+
+N_sp_placette_versant_topo_plot |> ggsave(
+  filename = here("output", "N_sp_placette_versant_topo_plot.pdf"),
+  plot     = _,
+  height   = 10,
+  width    = 15
+)
+```
+
+# Etude du diametre moyen des arbres 
+
+(par placette), par topologie et par orientation
+
+Regarder jeunes arbres, grands arbres, hauteur ?
+
+```{r}
+circo <- seq(from = 30, to = 120, by = 10)
+
+circo_by_sp_expo_topo <- dataArbre |>
+  Placette_join() |>
+  dplyr::filter(Espece == c("Carpinus betulus", "Quercus petraea", "Quercus pubescens")) |>
+  group_by(Espece, Topo, Versant) |>
+  rowwise() |>
+  mutate(
+    CircoMoyenne = sum(circo*c_across(`25-34`:`115-124`))/sum(c_across(`25-34`:`115-124`)),
+    na.rm        = TRUE
+  ) |>
+  ggplot(aes(x = Versant, y = CircoMoyenne) ) +
+    geom_boxplot() +
+    geom_jitter(color = "black", size = 0.6, alpha = 0.3) +
+    theme_bw() +
+    ylab("Circonférence moyenne") +
+    theme(
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+      strip.text  = element_text(size = 6, angle = 90)
+    ) +
+    facet_grid(Topo ~ Espece)
+
+circo_by_sp_expo_topo
+
+circo_by_sp_expo_topo |> ggsave(
+  file  = here("output", "circo_by_sp_expo_topo.pdf"),
+  width = 10, height = 20, units = "cm"
+)
+
+rm(circo_by_sp_expo_topo)
+```
+
+
+```{r}
+circo_by_sp_expo <- dataArbre |>
+  Placette_join() |>
+  group_by(Espece, Topo, Versant) |>
+  rowwise() |>
+  mutate(
+    DiametreMoyen = sum(circo*c_across(`25-34`:`115-124`))/sum(c_across(`25-34`:`115-124`)),
+    na.rm        = TRUE
+  )|>
+  ggplot(aes(x = Versant, y = DiametreMoyen)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(color = "black", size = 0.4, alpha = 0.2) +
+    theme_bw() +
+    ylab("Circonférence moyenne") +
+    theme(
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+      strip.text  = element_text(size = 6, angle = 90)
+    ) +
+    facet_grid(. ~ Espece)
+
+circo_by_sp_expo
+
+circo_by_sp_expo |> ggsave(
+  file = here("output", "circo_by_sp_expo.pdf"),
+  width = 30,  height = 10, units = "cm"
+)
+
+rm(circo_by_sp_expo)
+```
+
+
+```{r}
+circo_by_sp_topo <- dataArbre |>  
+  Placette_join() |>
+  group_by(Espece,Topo, Versant) |> 
+  rowwise() |>
+  mutate(
+    DiametreMoyen = sum(circo*c_across(`25-34`:`115-124`))/sum(c_across(`25-34`:`115-124`)),
+    na.rm         = TRUE
+  )|>
+    ggplot(aes(x = Topo,y = DiametreMoyen)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(color = "black", size = 0.4, alpha = 0.2) +
+    theme_bw() +
+    ylab("Circonférence moyenne") +
+    theme(
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+      strip.text  = element_text(size = 6, angle = 90)
+    ) +
+    facet_grid(. ~ Espece)
+circo_by_sp_topo
+  
+circo_by_sp_topo |> ggsave(file = here("output", "circo_by_sp_topo.pdf"),
+                           width = 30, height = 10, units = "cm")
+
+rm(circo_by_sp_topo)
+```
+
+Distribution des diamètres
+
+```{r}
+dataArbre_long <- dataArbre |>
+  Placette_join() |>
+  dplyr::filter(Espece == c("Carpinus betulus", "Quercus petraea", "Quercus pubescens")) |>
+  select(c(`25-34`:`115-124`, Topo, Versant, Espece)) |>
+  group_by(Topo, Espece) |>
+  summarise(across(`25-34`:`115-124`, sum)) |>
+  pivot_longer(c(`25-34`:`115-124`), names_to = "class", values_to = "number")
+
+dataArbre_long$class <- factor(dataArbre_long$class,
+                               levels  = names(dataArbre)[2:11])
+
+distri_sp_by_topo <- dataArbre_long |>
+  ggplot(aes(x = class, y = number)) +
+    geom_bar(stat = "identity") +
+    theme_bw() +
+    ylab("Distribution par diamètre") +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+    facet_grid(Topo ~ Espece) +
+    scale_x_discrete(labels = circo)
+
+distri_sp_by_topo
+
+distri_sp_by_topo |> ggsave(file = here("output", "distri_sp_by_topo.pdf"),
+                            width = 60, height = 15, units = "cm")
+
+rm(distri_sp_by_topo)
+
+
+
+dataArbre_long <- dataArbre |>  
+  Placette_join() |>
+  dplyr::filter(Espece == c("Carpinus betulus", "Quercus petraea", "Quercus pubescens")) |>
+  select(c(`25-34`:`115-124`, Topo, Versant, Espece))|>
+  group_by(Versant, Espece) |> 
+  summarise(across(`25-34`:`115-124`, sum))|> 
+  pivot_longer(c(`25-34`:`115-124`), names_to = "class", values_to = "number")
+
+distri_sp_by_expo <- dataArbre_long |> 
+  ggplot(aes(x = class, y = number)) +
+    geom_bar(stat = "identity") +
+    ylab("Distribution par diamètre") +
+    xlab("Exposition") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+    facet_grid(Versant ~ Espece) +
+    scale_x_discrete(labels = circo)
+
+distri_sp_by_expo
+
+distri_sp_by_expo |> ggsave(file = here("output", "distri_sp_by_expo.pdf"),
+                            width = 60, height = 15, units = "cm")
+
+rm(distri_sp_by_expo)
+#print(dataArbre_long|>subset(Espece=="Fraxinus exclesior")|>arrange(desc(number)),n=30)
+
+```
+
+
+# Etude de la surface terrière par topologie et par orientation
+
+
+
+```{r}
+
+
+#    circo   = 2*pi*R 
+# => circo^2 = 4 pi*pi*R*R (1)
+
+#    aire    = pi*R*R (2)
+
+#    circo^2      = 4 pi*aire   (1) & (2)
+# => (circo^2)/(4*pi) = aire
+
+
+circo <- seq(from = 30, to = 120, by = 10) # Moyennes de circonférence par classe
+aire  <- circo^2/(4 * pi) 
+
+aire_by_sp_expo_topo <- dataArbre |>  
+  Placette_join() |>
+  dplyr::filter(Espece == c("Carpinus betulus", "Quercus petraea", "Quercus pubescens")) |>
+  group_by(Espece, Topo, Versant) |> 
+  rowwise() |>
+  mutate(Aire = sum(aire*c_across(`25-34`:`115-124`))) |> 
+  ggplot(aes(x = Versant, y = Aire)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(color = "black", size = 0.4, alpha = 0.2) +
+    ylab("Surface Terrière") +
+    ylab("Exposition") +
+    theme_bw() +
+    theme(
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+      strip.text  = element_text(size = 6, angle = 90)
+    ) +
+    facet_grid(Topo ~ Espece)
+
+aire_by_sp_expo_topo
+  
+aire_by_sp_expo_topo |> ggsave(file = here("output", "aire_by_sp_expo_topo.pdf"),
+                               width = 30, height = 10, units = "cm")
+  
+rm(aire_by_sp_expo_topo)
+
+aire_by_expo_topo <- dataArbre |>
+  Placette_join() |>
+  select(c(`25-34`:`115-124`, Topo, Versant, Placette)) |>
+  group_by(Topo, Versant, Placette) |>
+  summarise(across(`25-34`:`115-124`, sum)) |>
+  rowwise() |>
+  mutate(Aire = sum(aire * c_across(`25-34`:`115-124`))) |>
+  ggplot(aes(x = Versant, y = Aire)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(color = "black", size = 1, alpha = 0.3) +
+    labs(
+      x = "Topo",
+      y = "Surface Terrière"
+    ) +
+    theme_bw() +
+    theme(
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+      strip.text  = element_text(size = 6, angle = 90)
+    ) +
+    facet_grid(. ~ Topo)
+
+aire_by_expo_topo
+
+aire_by_expo_topo |> ggsave(file  = here("output", "aire_by_expo_topo.pdf"),
+                            width = 10, height = 15, units = "cm")
+
+rm(aire_by_expo_topo)
+```
+
+# Etude de la hauteur dominante
+
+```{r}
+hauteur_by_sp_topo <- dataArbre |>  
+  Placette_join() |> 
+  group_by(cbind(Placette, Sous_placette), Topo, Versant) |> 
+  summarise(HauteurMax = max(`Hauteur_Dominante_(m)`, na.rm = TRUE))|>
+  ggplot(aes(x = Topo, y = HauteurMax)) +
+    geom_violin(outlier.shape = NA) +
+    geom_jitter(color = "black", size = 0.4, alpha = 0.2) +
+    ylab("Hauteur dominante") +
+    theme_bw() +
+    theme(
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+      strip.text = element_text(size = 6, angle = 90)
+    ) +
+    facet_grid(. ~ Versant)
+
+hauteur_by_sp_topo
+  
+hauteur_by_sp_topo |> ggsave(file = "hauteur_by_sp_topo.pdf", 
+                             width = 30, height = 10, units = "cm")
+
+
+ANOVA <- dataArbre |> 
+  Placette_join() |> 
+  group_by(cbind(Placette, Sous_placette), Topo, Versant) |> 
+  summarise(HauteurMax = max(`Hauteur_Dominante_(m)`, na.rm = TRUE)) |> 
+  lm(HauteurMax ~ Versant * Topo, data = _)
+
+ANOVA |> car::Anova(lmhaut)
+```
+
+
+faire moyenne des diametres et surface terrière. Aussi, faire histogrammes 
+
+
+
+Mettre en regard de la placette, sa nature (exposition et type de pente)
+
+Calculer la surface terrière par espèce et par Placette 
+
+# AFC 
+
+http://www.sthda.com/english/articles/31-principal-component-methods-in-r-practical-guide/113-ca-correspondence-analysis-in-r-essentials/
+
+
+```{r}
+library("FactoMineR")
+library("factoextra")
+
+
+dataArbreWide <- dataArbre |>  
+  Placette_join() |> 
+  group_by(Espece, cbind(Placette, Sous_placette), Topo, Versant) |> 
+  summarise(sum = rowSums(across(where(is.numeric)), na.rm = TRUE)) |>
+  pivot_wider(names_from = Espece, values_from = sum)
+
+res.ca <- CA(dataArbreWide[, -c(1:3)], graph = FALSE)
+fviz_screeplot(res.ca, addlabels = TRUE, ylim = c(0, 30))
+fviz_ca_biplot(res.ca, repel = TRUE)
+
+fviz_ca_col(res.ca, repel = TRUE)
+
+fviz_ca_row(res.ca, repel = TRUE, col.row = dataArbreWide$Topo)
+
+
+
+```
+
+<!-- ```{r} -->
+<!-- circonf<-read.csv("data/Circonf.csv") -->
+<!-- ggplot(circonf,aes(x=Placette))+geom_bar()+theme_bw()+ylab("nombre d'abres") -->
+<!-- ggplot(circonf,aes(x=Placette,fill=Etat))+ -->
+<!--   geom_bar(position=position_dodge())+ -->
+<!--   scale_fill_grey()+ -->
+<!--   theme_bw()+ -->
+<!--   ylab("nombre d'arbres") -->
+
+<!-- ``` -->
+
+
+<!-- On peut observer le nombre d'arbres selon le type de placette (Exposition et Topo). On sélectionne les vivants. On voit davantage d'arbres au Sud, surtout bas et milieu de pente. Ceci est significatif (glm poisson) -->
+
+<!-- ```{r} -->
+<!-- circonf |>  -->
+<!--   filter(Etat == "V") |> -->
+<!--   ggplot(aes(x=Exposition))+ -->
+<!--   geom_bar()+ -->
+<!--   theme_bw()+ -->
+<!--   ylab("nombre d'abres") -->
+
+<!-- circonf$Topo <- factor(circonf$Topo, levels = c('BDP','MDP','HDP')) -->
+<!-- circonf |>  -->
+<!--   filter(Etat == "V") |> -->
+<!--   ggplot(aes(x=Exposition,fill=Topo))+ -->
+<!--   geom_bar(position=position_dodge())+ -->
+<!--   scale_fill_grey()+ -->
+<!--   theme_bw()+ -->
+<!--   ylab("nombre d'arbres") -->
+
+
+<!-- modexpo<-glm(cumulees$Nombre_Arbres~cumulees$Exposition,family="poisson") -->
+<!-- summary(modexpo) -->
+<!-- #emmeans -->
+
+
+<!-- ``` -->
+
+<!-- On peut calculer la surface terrière par placette. c'est à dire la somme des surfaces des arbres calculées à partir de leurs diamètres.  -->
+
+<!-- ```{r} -->
+
+<!-- # circonférence= 2*pi*R -->
+<!-- # circo ² = 4 pi*pi*R*R -->
+<!-- # aire=pi*R*R -->
+<!-- # circo ² = 4 pi*aire -->
+<!-- # aire = circo²/4*pi -->
+
+<!-- circonf$Aire <-  circonf$Circonference^2/(4*pi) -->
+
+<!-- ### représenter la somme des aires par type de placette.  -->
+<!-- circonf$Topo <- factor(circonf$Topo, levels = c('BDP','MDP','HDP')) -->
+<!-- circonf |>  -->
+<!--   filter(Etat == "V") |> -->
+<!--   group_by(Exposition, Topo) |>  -->
+<!--     summarise(summedSurface = sum(Aire)) |>  -->
+<!--     ggplot(aes(x = Exposition, y = summedSurface, fill = Topo)) + -->
+<!--     geom_bar(stat = "identity", position = "dodge")+ -->
+<!--     scale_fill_grey()+ -->
+<!--     theme_bw()+ -->
+<!--     ylab("Surface terrière") -->
+
+<!--   ggplot(aes(x=Exposition,fill=Topo))+ -->
+<!--   geom_bar(position=position_dodge())+ -->
+<!--   scale_fill_grey()+ -->
+<!--   theme_bw()+ -->
+<!--   ylab("nombre d'arbres") -->
+
+
+<!-- ``` -->
+
+
+
+<!-- ## Etude du nombre d'individus -->
+
+
+<!-- ```{r} -->
+<!-- cumulees<-read.csv("data/Cumulees.csv") -->
+<!-- ggplot(cumulees,aes(x=Topo,y=Nombre_Arbres))+geom_boxplot(aes(fill=Topo))+theme_bw() -->
+<!-- ggplot(cumulees,aes(x=Exposition,y=Nombre_Arbres))+geom_boxplot(aes(fill=Exposition))+theme_bw() -->
+<!-- ``` -->
+
+
+
+<!-- # Travail des étudiants ci-dessous -->
+
+<!-- ## Etude du nombre d'arbres -->
+
+
+<!-- On peut tout d'abord s'intéresser au nombre d'arbres par placette. Une première possibilité est de le mettre en regard de la topographie ou de l'exposition. Ces deux paramètres sont les deux variables explicatives que l'on retiendra pour le reste de l'analyse de nos données. -->
+<!-- Pour cela, on peut présenter des boxplot du nombre d'arbres en fonction de la topographie ou en fonction de l'exposition.  -->
+
+<!-- ```{r} -->
+<!-- cumulees<-read.csv("data/Cumulees.csv") -->
+<!-- ggplot(cumulees,aes(x=Topo,y=Nombre_Arbres))+geom_boxplot(aes(fill=Topo))+theme_bw() -->
+<!-- ggplot(cumulees,aes(x=Exposition,y=Nombre_Arbres))+geom_boxplot(aes(fill=Exposition))+theme_bw() -->
+<!-- ``` -->
+
+<!-- On observe des premières tendances (plus d'individus au Sud qu'au Nord, plus d'individus en HDP et MDP qu'en BDP) que l'on va chercher à confirmer par des analyses statistiques.  -->
+
+
+<!-- Préalablement, il est nécessaire de connaîtres les caractéristiques de nos variables. -->
+<!-- Traçons l'histogramme pour le nombre d'arbres. -->
+
+<!-- ```{r} -->
+<!-- hist(cumulees$Nombre_Arbres) -->
+<!-- ``` -->
+
+<!-- On ne peut pas considérer cette variable comme étant gaussienne. Ainsi, pour l'ANOVA, on ne peut pas utiliser le modèle linéaire.  -->
+<!-- On va donc utiliser un modèle linéaire généralisé. Etant donné que nous avons ici des données de comptage, on considère notre variable comme étant de Poisson.  -->
+<!-- Cela aboutit au code suivant :  -->
+
+<!-- ```{r} -->
+<!-- modexpo<-glm(cumulees$Nombre_Arbres~cumulees$Exposition,family="poisson") -->
+<!-- summary(modexpo) -->
+<!-- ``` -->
+
+<!-- De ce modèle linéaire généralisé, on peut conclure que le nombre d'arbre est significativement différent entre les placettes exposées au Nord et celles exposées au Sud, avec 56% plus d'arbres en cas d'exposition Sud.  -->
+
+<!-- ```{r} -->
+<!-- library(emmeans) -->
+<!-- library(lsmeans) -->
+<!-- modtopo<-glm(cumulees$Nombre_Arbres~cumulees$Topo,family="poisson") -->
+<!-- summary(modtopo) -->
+<!-- pairs(lsmeans(modtopo,~Topo)) -->
+<!-- ``` -->
+
+<!-- Pour l'effet de la topologie, on montre qu'il y a significativement moins d'arbres en BDP qu'en MDP (-56%) et HDP (-61%); mais qu'il n'y a pas de différences significative entre MDP et HDP. -->
+<!-- D'autres tests permettent de montrer des résultats similaires : -->
+
+<!--    - On peut aussi réaliser un test non-paramétrique basé sur le rang, il s'agit du test de Kruskal-Wallis. Il ne nécessite aucune hypothèse préalable sur la distribution des variables.  -->
+
+<!-- ```{r} -->
+<!-- kruskal.test(cumulees$Nombre_Arbres~cumulees$Topo) -->
+<!-- ``` -->
+
+<!--   - On peut également réalisé un test de Wilcoxon.  -->
+
+<!-- ```{r} -->
+<!-- wilcox.test(cumulees$Nombre_Espece[cumulees$Topo=="BDP"],cumulees$Nombre_Espece[cumulees$Topo=="MDP"]) -->
+<!-- wilcox.test(cumulees$Nombre_Espece[cumulees$Topo=="BDP"],cumulees$Nombre_Espece[cumulees$Topo=="HDP"]) -->
+<!-- wilcox.test(cumulees$Nombre_Espece[cumulees$Topo=="MDP"],cumulees$Nombre_Espece[cumulees$Topo=="HDP"]) -->
+<!-- ``` -->
+
+
+<!-- ## Etude de la biodiversité -->
+
+<!-- L'indicateur de biodiveristé que nous avons retenu pour cette étude est l'indice de Shannon.  -->
+<!-- Cela donne les boxplots suivants :  -->
+
+<!-- ```{r} -->
+<!-- ggplot(cumulees,aes(x=Topo,y=IndiceShannon))+geom_boxplot(aes(fill=Topo))+theme_bw() -->
+<!-- ggplot(cumulees,aes(x=Exposition,y=IndiceShannon))+geom_boxplot(aes(fill=Exposition))+theme_bw() -->
+<!-- ``` -->
+
+<!-- On peut aller plus loin en cherchant de potentielles interactions entre l'exposition et la topographie.  -->
+
+<!-- ```{r} -->
+<!-- ggplot(cumulees,aes(x=Exposition,y=IndiceShannon))+geom_boxplot(aes(fill=Topo)) -->
+<!-- ``` -->
+
+<!-- Confirmons les tendances observées quant aux impacts de l'exposition et de la topographie sur la biodiversité. Malgré le nombre limité de données avec des distributions qui ne reflètent pas exactement des lois normales (cf histogramme ci-dessous), on utilise un modèle linéaire pour réaliser des ANOVA-2. -->
+
+<!-- ```{r} -->
+<!-- hist(cumulees$IndiceShannon) -->
+<!-- library("lsmeans") -->
+<!-- modelbiodiv<-lm(cumulees$IndiceShannon~cumulees$Exposition*cumulees$Topo) -->
+<!-- anova(modelbiodiv) -->
+<!-- pairs(lsmeans(modelbiodiv, ~Topo)) -->
+<!-- ``` -->
+
+<!-- On constate que la topographie a un impact significatif sur la biodiversité : plus on est bas dans la pente, plus la biodiversité est importante. La biodiversité des bas de pente est significativement plus forte que celle des milieux et hauts de pente, et on peut dégager la même tendance entre milieux et hauts de pente, mais de manière moins significative. Quant à elle, l'exposition en tant que telle n'en a pas. Cependant, il y a une interaction significative entre les deux paramètres : une exposition Sud accentue les différences de biodiversité entre les hauts, milieux et bas de pente. -->
+
+
+<!-- ## Etude de la répartition spécifique -->
+
+<!-- Après l'étude de la biodiversité, on peut également se pencher sur des données plus précises. Par exemple, la présence des deux espèces majoritaires de chênes  (pubescent ou sessile) semble varier en fonction de l'exposition. Les box plots suivants présentent le rapport sessile/(sessile + pubescent) face à une exposition Nord ou Sud. -->
+
+
+<!-- ```{r} -->
+<!-- ggplot(cumulees,aes(x=Exposition,y=Petraea/(Pubescens+Petraea)))+geom_boxplot(aes(fill=Exposition))+theme_bw() -->
+<!-- ``` -->
+
+<!-- Grâce aux tests suivants, on montre que les chênes pubescents sont significativement plus présents lorsque la placette est exposée au Sud et que les chênes sessiles sont plus présents lorsqu'elle est exposée au Nord :  -->
+
+<!-- ```{r} -->
+<!-- cumulees<-read.csv("Cumulees.csv") -->
+<!-- wilcox.test(cumulees$Pubescens[cumulees$Exposition=="N"],cumulees$Pubescens[cumulees$Exposition=="S"]) -->
+<!-- wilcox.test(cumulees$Petraea[cumulees$Exposition=="N"],cumulees$Petraea[cumulees$Exposition=="S"]) -->
+<!-- ``` -->
+
+<!-- Un autre test permettrait de conclure : (c'est là que ça coince) -->
+
+<!-- ```{r} -->
+<!-- glm(cbind(cumulees$Petraea,cumulees$Pubescens)~as.factor(cumulees$Exposition),family="binomial") -->
+<!-- ``` -->
+
+
+<!-- Mais comment expliquer cette différence d'un point de vue biologique ? Il est reconnu que le chêne pubescent est une espèce heliophile et thermophile. Il est donc logique de le retrouver en grande majorité sur les versants exposés Sud. Une hypothèse peut-être proposée pour expliquer cette heliophilie/thermophilie. Pour cela, il faut s'intéresser aux feuilles de ces deux arbres :  -->
+
+<!-- ![Détail d'une feuille de chêne pubescent.](feuille_pub.jpeg){width=250px} -->
+
+
+<!-- ![Détail d'une feuille de chêne sessile.](feuille_ses.jpeg){width=250px} -->
+
+
+<!-- Comme son nom l'indique, le chêne pubescent présente sur la face inférieure de ses feuilles des "poils" courts et mous. Cela leur donne un aspect duveteux visible sur l'image ci-dessus (caractère absent chez le chêne sessile). Il est possible que ce duvet permette à la feuille de maintenir une couche conducto-convective limitant la transpiration foliaire. Ainsi, le chêne pubescent, au contraire du chêne sessile, peut résister à des conditions plus chaudes et plus arides.  -->
+
+
+<!-- ## Etude de la hauteur des strates -->
+
+<!-- D'autres mesures susceptibles d'être analysées sont les hauteurs moyennes des strates. -->
+
+<!-- ```{r} -->
+<!-- infos<-read.csv("Infos.csv") -->
+<!-- ggplot(infos, aes(x=Topo,y=Hherbacé)) + geom_boxplot(aes(fill=Topo)) + theme_bw() -->
+<!-- ggplot(infos, aes(x=Topo,y=Harbustif)) + geom_boxplot(aes(fill=Topo))+ theme_bw() -->
+<!-- ggplot(infos, aes(x=Topo,y=Harboré)) + geom_boxplot(aes(fill=Topo)) + theme_bw() -->
+<!-- ``` -->
+
+<!-- Faisons une analyse ANOVA pour connaître l'impact de la topographie sur hauteur de la strate arborée. On considère cette variable commme gaussienne (cf histogramme ci-dessous puis le "check_normality").  -->
+
+<!-- ```{r} -->
+<!-- library(performance) -->
+<!-- hist(infos$Harboré) -->
+<!-- mod3<-lm(infos$Harboré~infos$Topo,cumulees=infos ) -->
+<!-- summary(mod3) -->
+<!-- check_normality(mod3) -->
+<!-- check_heteroskedasticity(mod3) -->
+<!-- anova(mod3) -->
+<!-- ``` -->
+
+<!-- La topographie a donc un impact significatif sur la hauteur de la strate arborée. En combinant cette analyse au boxplot des statistiques descriptives, on peut donc affirmer que : en bas de pente, la hauteur moyenne de la strate arborée est plus élevée qu'en milieu ou haut de pente.  -->
+
+<!-- ++++ quantifier, variance bien expliquée par topologie ++++ -->
+
+
+<!-- # Analyse factorielle des correspondances sur les individus -->
+
+<!-- Afin de trouver les composantes expliquant les variations de la distribution des espèces, nous avons réalisé une AFC.  -->
+
+<!-- ```{r} -->
+<!-- library("ade4") -->
+<!-- diversite<-read.csv("Diversite.csv") -->
+<!-- elim=c("Placette","Sous_placette","Topo","Exposition") -->
+<!-- diversite2=diversite[,!names(diversite)%in%elim] -->
+<!-- test<-dudi.coa(diversite2,scannf=FALSE) -->
+<!-- test -->
+<!-- ``` -->
+
+
+<!-- A partir de ces premières données, nous pouvons conservé uniquement les deux premiers axes (puisqu'ils expliquent plus de 50% des variations).   -->
+
+<!-- ```{r} -->
+<!-- afc<-dudi.coa(df=diversite2, scannf=FALSE, nf=2) -->
+<!-- ``` -->
+
+<!-- On obtient donc :  -->
+
+<!-- ```{r} -->
+<!-- s.label(afc$co, xax = 1, yax = 2) -->
+<!-- ``` -->
+
+<!-- On observe ici l'importance des Quercus pubescens (chêne pubescent) et Quercus petraea (chêne sessile) dans la constitution de l'axe 1. Cela rappelle l'analyse sur la distribution des chênes plus haut. Ceci peut être quantifié par la commande suivante :  -->
+
+<!-- ```{r} -->
+<!-- library("factoextra") -->
+<!-- fviz_contrib(afc, choice="col") -->
+<!-- ``` -->
+
+
+<!-- L'explication est plus complexe pour l'axe 2. La commande suivant nous montre que le chêne sessile, et dans une moindre mesure le frêne et l'érable champêtre drivent cet axe.  -->
+
+<!-- ```{r} -->
+<!-- fviz_contrib(afc, choice="col", axes=2) -->
+<!-- ``` -->
+
+<!-- Neanmoins, il faut nuancer cette explication. En effet, les chênes sont présents en grand nombre. Or, cette analyse est basée sur la loi du chi2, loi influencée par l'effectif.  -->
+
+
+<!-- A présent, essayons de faire ressortir nos paramètres (exposition et topographie) sur cette AFC. -->
+
+<!-- ```{r} -->
+<!-- topo<-as.factor(diversite$Topo) -->
+<!-- exposition<-as.factor(diversite$Exposition) -->
+<!-- gcol <- c("red", "blue","green") -->
+<!-- gcol1<-c("black","orange") -->
+<!-- s.class(dfxy = afc$li, fac = topo, col = gcol, xax = 1, yax = 2) -->
+<!-- s.class(dfxy = afc$li, fac = exposition, col = gcol1, xax = 1, yax = 2) -->
+<!-- ``` -->
+
+<!-- Cela facilite une potentielle interprétation.  -->
+<!-- L'axe 1 est expliqué par l'exposition car cet axe segrege selon Nord et Sud. Donc, des espèces sont plus spécifiques du Sud que du Nord et inversement. -->
+<!-- L'axe 2 est expliqué par la topographie puisqu'on y observe un gradient de pente : BDP puis MDP et HDP. Donc, des espèces sont plus spécifiques du BDP et que du MDP et HDP et inversement. -->
+
+
+<!-- Cherchons à quantifier cela via une BCA.  -->
+
+<!-- ```{r} -->
+<!-- bcatopo<-bca(x=afc, fac=topo, scannf=FALSE, nf=2) -->
+<!-- bcaexp<-bca(x=afc, fac=exposition, scannf=FALSE, nf=2) -->
+<!-- bcatopo -->
+<!-- bcaexp -->
+<!-- ``` -->
+
+<!-- Ceci nous informe que la topographie explique 19,3% de la variabilité observée. L'exposition en explique elle 18,1%.  -->
+
+
+<!-- En complément de cette BCA, on peut réaliser une analyse discriminative. -->
+
+<!-- ```{r} -->
+<!-- afc2<-dudi.coa(df=diversite2, scannf=FALSE, nf=ncol(diversite2)-1) -->
+<!-- dis1<-discrimin(dudi=afc2, fac=as.factor(diversite$Exposition), scannf=FALSE) -->
+<!-- dis2<-discrimin(dudi=afc2, fac=as.factor(diversite$Topo), scannf=FALSE) -->
+<!-- plot(dis1) -->
+<!-- plot(dis2) -->
+<!-- ``` -->
+
+
+<!-- # Analyse en composantes principales sur la biomasse -->
+
+<!-- A présent, il peut être intéressant de se pencher sur la biomasse et non sur le nombre d'individus. Pour cela, on analyse la grandeur suivante biomasse/placette/espèce. On effectue pour cela une ACP. La biomasse est représentée par la surface des troncs des arbres, calculée à partir de la circonférence. -->
+
+<!-- ```{r} -->
+<!-- diversite_s<-read.csv("Diversite_Surface.csv") -->
+<!-- elim=c("Placette","Sous_placette","Topo","Exposition") -->
+<!-- diversite_s2=diversite_s[,!names(diversite_s)%in%elim] -->
+<!-- acp<-dudi.pca(diversite_s2, scannf=FALSE, nf=3) -->
+<!-- acp -->
+<!-- topo<-as.factor(diversite_s$Topo) -->
+<!-- exposition<-as.factor(diversite_s$Exposition) -->
+<!-- gcol <- c("red", "blue","green") -->
+<!-- gcol1<-c("black","orange") -->
+<!-- s.class(dfxy = acp$li, fac = topo, col = gcol, xax = 1, yax = 2) -->
+<!-- s.class(dfxy = acp$li, fac = exposition, col = gcol1, xax = 1, yax = 2) -->
+
+
+<!-- s.corcircle(acp$co, xax = 1, yax = 2) -->
+
+<!-- scatter(acp) -->
+<!-- s.label(acp$co, xax=1, yax=2) -->
+
+<!-- fviz_contrib(acp, choice="var") -->
+<!-- fviz_contrib(acp, choice="var", axes=2) -->
+<!-- ``` -->
+
+<!-- Cette fois, c'est l'axe 1 qui sépare le bas de pente du milieu de pente et du haut de pente (qui sont tout de même moins ségrégés que dans l'AFC). -->
+<!-- L'axe 2 explique l'effet de l'exposition, qui est aussi moins marqué que dans l'AFC. -->
+
+<!-- On observe cette fois un effet de la taille : les frênes et les aulnes, qui avaient généralement une circonférence élevée, ont une contribution plus importante à l'axe 1. -->
+
+
+<!-- Comme pour l'AFC, quantifions cela via une BCA.  -->
+
+<!-- ```{r} -->
+<!-- bca3<-bca(x=acp, fac=topo, scannf=FALSE, nf=2) -->
+<!-- bca4<-bca(x=acp, fac=exposition, scannf=FALSE, nf=2) -->
+<!-- bca3 -->
+<!-- bca4 -->
+<!-- ``` -->
+
+<!-- Dans ce cas, la topographie explique 12% de la variance, alors que l'exposition explique 7%. -->
+
+
+<!-- On peut également réaliser une analyse discrimante.  -->
+
+<!-- ```{r} -->
+<!-- acp2<-dudi.coa(df=diversite_s2, scannf=FALSE, nf=ncol(diversite_s2)-1) -->
+<!-- dis<-discrimin(dudi=acp2, fac=as.factor(diversite_s$Topo), scannf=FALSE) -->
+<!-- plot(dis) -->
+<!-- ``` -->
+
+<!-- Ici, l'axe 2 explique la séparation du bas de pente. Les axes 13, 15 et 1 expliquent les différences haut de pente et milieu de pente. -->
+<!-- La différence entre milieu de pente et haut de pente est moins marquée qu'en utilisant le comptage des individus et en réalisant une AFC. L'augmentation de circonférence de l'arbre compense un nombre inférieur d'arbre, par exemple.  -->

@@ -1,0 +1,3230 @@
+---
+title: "Communautés végétales de Sous Bois "
+author: "Leo DI VITA MORRIS, Ema COICAUD-TOURNOIS, Jules MOURGUES, Lorenzo FRAYSSE, Timothée DARBOIS"
+date: "2023-05-05"
+output:
+  prettydoc::html_pretty:
+    toc: true
+    number_sections: true
+    theme: cayman
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Différentes approches ont étés envisagées:
+
+- l'étude des recouvrements 
+- l'étude des diversités spécifiques
+
+Différentes échelles considérées:
+
+- Considérer les Parcelles comme unité d'étude
+- Considérer les Quadrats comme unité d'étude
+
+Étudier l'influence de différentes variables sur les communautés:
+
+- Effet de la Topologie
+- Effet de l'exposition
+- Effet du Vallon
+
+NB: Ci dessous se trouve les 6 approches que nous avons envisagé, avec à chaque fois une première étape de visualisation du jeu de donnée, puis des approfondissement statistique s'il y en a eu.
+
+
+
+
+```{r chargement des librairies nécéssaires, include=FALSE}
+library(ade4)
+library(ggplot2)
+library(tidyverse)
+library(data.table)
+library(dplyr)
+library(FactoMineR)
+library(factoextra)
+library(pheatmap)
+library(sjPlot)
+library(gridExtra)
+library(contrast)
+library(DT)
+library(emmeans)
+library(lsmeans)
+
+```
+
+```{r import des Données, include=FALSE}
+setwd("/home/marie/Documents/Enseignement/EnseignementNew/Enseignement/CoursL3/UEEcoloAnalyseData/Rendus2023/Rendus_groupe/CommunautésVeg/")
+Table_Recouvrement_Spécifique_Quadrats<- read.csv('Recouvrements spécifiques compilée - Table des recouvrements spécifiques compilée.csv',skip =1)
+Table_Recouvrement_Spécifique_Placettes<- read.csv('Recouvrements spécifiques compilée - Table des recouvrements spécifiques compilée.csv')
+
+Table_Recouvrement_Global<-read.csv('Recouvrements globaux compilee - Table des recouvrements globaux compilée.csv')
+
+Table_caractéristiques_placettes=read.csv(file="Table_caractéristiques_placettes.csv") #tableau des caractéristiques par placette
+```
+
+
+```{r import des données, include=FALSE}
+Herbe<-read.csv("Herbacees compilees - Herbacees compilees.csv")
+Buisson<-read.csv('Arbustifs compiles - Arbustifs compilees.csv')
+Arbre<-read.csv('Arbres compiles - Arbres compilés.csv')
+
+
+```
+
+```{r}
+Herbesp <- read.csv('Herbacees compilees - Herbacees compilees.csv',skip =1)
+
+arbustifsp <- read.csv('Arbustifs compiles - Arbustifs compilees.csv',skip =1)
+
+arbresp <- read.csv('Arbres compiles - Arbres compilés.csv',skip =1)
+```
+# Étude des Classes de recouvrement du substrat et des différentes strates
+
+Répartition des quadrats en fonction de la classe de recouvrement
+
+## Étude du recouvrement en Litière
+
+```{r}
+Table_Recouvrement_Global$Placette<-as.factor(Table_Recouvrement_Global$Placette)
+litiere=Table_Recouvrement_Global$Litière
+moy_lit<-lapply(litiere,FUN=mean)
+
+table_abondlit<-table(Table_Recouvrement_Global$Placette,Table_Recouvrement_Global$Litière)
+nb_quadrat=c(0,7)
+for (i in 1:7){
+  nb_quadrat[i]<-sum(table_abondlit[,i-1])
+}
+class_recouvre=c(0,1,2,3,4,5,6)
+
+ggplot(data.frame(class_recouvre,nb_quadrat),aes(x=class_recouvre,y=nb_quadrat)) +geom_point() +ggtitle("Litière")
+```
+```{r "création d'une data frame avec tout les recouvrements"}
+tab2=data.frame(Table_Recouvrement_Global$Litière,Table_Recouvrement_Global$Sol.Nu,Table_Recouvrement_Global$Mousse)
+```
+
+```{r "effet de l'exposition + topographie sur le recouvrement du sol en litière"}
+class_recouvre2a<-rep(c(0,1,2,3,4,5,6),2)
+
+donnee<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Litière,expo=Table_Recouvrement_Global$Exposition.approx)
+
+nb_quadrat_exp=rep(0,14)
+for (i in 1:6){
+  nb_quadrat_exp[i+1]<-sum(donnee[,i,expo='N'])
+}
+for (i in 9:14){
+  nb_quadrat_exp[i]<-sum(donnee[,i-8,expo='S'])
+}
+expo=c(rep('N',7),rep('S',7))
+```
+
+
+```{r "effet de l'exposition et de la topographie sur le recouvrement du sol en litière"}
+class_recouvre2b<-rep(c(0,1,2,3,4,5,6),3)
+
+donnee<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Litière,pos_pente=Table_Recouvrement_Global$Position_pente)
+
+nb_quadrat_topo=rep(0,21)
+for (i in 1:6){
+  nb_quadrat_topo[i+1]<-sum(donnee[,i,pos_pente='HDP'])
+}
+for (i in 9:14){
+  nb_quadrat_topo[i]<-sum(donnee[,i-8,pos_pente='MDP'])
+}
+for (i in 16:21){
+  nb_quadrat_topo[i]<-sum(donnee[,i-15,pos_pente='BDP'])
+}
+pospente=c(rep('HDP',7),rep('MDP',7),rep('BDP',7))
+```
+
+Visualisation Graphique
+```{r "Visualisation graphique des effets de la topographie et de l'exposition sur le recouvrement du sol en litière"}
+
+ggplot(data=data.frame(class_recouvre2a,nb_quadrat_exp,expo), aes(x=class_recouvre2a , y=nb_quadrat_exp, fill=expo)) + geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de l'exposition sur le recouvrement de la litière")
+
+ggplot(data=data.frame(class_recouvre2b,nb_quadrat_topo,pospente), aes(x=class_recouvre2b , y=nb_quadrat_topo, fill=pospente)) + geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de la topologie sur le recouvrement de la litière")
+
+
+```
+
+```{r "Tests statistiques du chi2 pour l'ensemble des données"}
+testchi2<-chisq.test(matrix(nb_quadrat_exp[0:14],ncol=2)[-1])
+testchi2
+
+testchi21<-chisq.test(matrix(c(nb_quadrat_topo[0:7],nb_quadrat_topo[8:14]),ncol=2)[-c(1:4),])
+testchi22<-chisq.test(matrix(c(nb_quadrat_topo[0:7],nb_quadrat_topo[15:21]),ncol=2)[-c(1:4),])
+testchi23<-chisq.test(matrix(c(nb_quadrat_topo[15:21],nb_quadrat_topo[8:14]),ncol=2)[-c(1:4),])
+A<-matrix(c(nb_quadrat_topo[15:21],nb_quadrat_topo[8:14],nb_quadrat_topo[0:7]),ncol=3)
+print("HDP-MDP")
+testchi21
+print("HDP-BPD")
+testchi22
+print("BDP-MDP")
+testchi23
+
+
+chisq.test(A[-c(1:4),])
+```
+NB: on a ici convertit les classes de recouvrement pour qu'elles soit utilisables informatiquement. La classe + est devenu 1, la 1 ->2, ...
+Par soucis de clarté, on parlera ici des classes que l'on voit sur les graphiques, donc de 0 à 6
+
+Conclusions:
+Les p value sont toutes significatives.
+Si l'on observe les distributions, on a l'impression qu'il y a moins de litière en bas de pente par rapport à ailleurs, avec une courbe ayant un mode à 4 en recouvrement, alors que les autres on un mode en 5 ou 6. On peut supposer que la litière est moins présente en bas de pente car elle est remplacé par autre chose. Pour l'exposition, on ne distingue pas de grandes tendances interprétable sur les graphiques.
+
+## Étude du recouvrement en Sol nu
+```{r "scatter plot du recouvrement en Sol nu"}
+donnee_sol_nu<-table(Table_Recouvrement_Global$Placette,Table_Recouvrement_Global$Sol.Nu)
+nb_quadrat=rep(0,7)
+for (i in 0:5){
+  nb_quadrat[i]<-sum(donnee_sol_nu[,i])
+}
+ggplot(data.frame(class_recouvre,nb_quadrat),aes(x=class_recouvre,y=nb_quadrat)) +geom_point()+ggtitle("sol nu ")
+```
+
+```{r}
+class_recouvre2a_sol_nu=rep(c(0,1,2,3,4,5,6),2)
+
+
+donnee_sol_nu<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Sol.Nu,expo=Table_Recouvrement_Global$Exposition.approx)
+
+nb_quadrat_expo=rep(0,14)
+
+for (i in 0:4){
+  nb_quadrat_expo[i]<-sum(donnee_sol_nu[,i,expo='N'])
+}
+for (i in 8:12){
+  nb_quadrat_expo[i]<-sum(donnee_sol_nu[,i-7,expo='S'])
+}
+expo_expo=c(rep('N',7),rep('S',7))
+
+
+
+class_recouvre2b_sol_nu=rep(c(0,1,2,3,4,5,6),3)
+
+donnee_sol_nu_topo<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Sol.Nu,pos_pente=Table_Recouvrement_Global$Position_pente)
+
+nb_quadrat_topo=rep(0,21)
+for (i in 0:5){
+  nb_quadrat_topo[i]<-sum(donnee_sol_nu_topo[,i,pos_pente='HDP'])
+}
+for (i in 8:12){
+  nb_quadrat_topo[i]<-sum(donnee_sol_nu_topo[,i-7,pos_pente='MDP'])
+}
+for (i in 15:19){
+  nb_quadrat_topo[i]<-sum(donnee_sol_nu_topo[,i-14,pos_pente='BDP'])
+}
+pospente=c(rep('HDP',7),rep('MDP',7),rep('BDP',7))
+```
+
+
+```{r "représentation graphique des effets de l'exposition et de la topographie sur le recouvrement en sol nu"}
+ggplot(data=data.frame(class_recouvre2a_sol_nu,nb_quadrat_expo,expo), aes(x=class_recouvre2a_sol_nu , y=nb_quadrat_expo, fill=expo)) +
+geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de l'exposition sur la surface de sol nu")
+ggplot(data=data.frame(class_recouvre2b_sol_nu,nb_quadrat_topo,pospente), aes(x=class_recouvre2b_sol_nu , y=nb_quadrat_topo, fill=pospente)) +
+geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de la topologie sur le recouvrement de sol nu")
+
+
+
+```
+
+```{r "tests statistiques des effets de l'exposition et de la topographie sur le recouvrement en sol nu"}
+testchi2<-chisq.test(matrix(c(nb_quadrat_expo[0:14],ncol=2))[-c(5:6),])
+testchi2
+
+
+testchi21<-chisq.test(matrix(c(nb_quadrat_topo[0:4],nb_quadrat_topo[7:11]),ncol=2))
+testchi22<-chisq.test(matrix(c(nb_quadrat_topo[0:4],nb_quadrat_topo[14:18]),ncol=2))
+testchi23<-chisq.test(matrix(c(nb_quadrat_topo[14:18],nb_quadrat_topo[7:11]),ncol=2)[-c(1)])
+
+B<-matrix(c(nb_quadrat_topo[0:6],nb_quadrat_topo[7:12],nb_quadrat_topo[13:18]),ncol=3)
+testchi24<-chisq.test(B[-c(5:6),])
+print("HDP-MDP")
+testchi21
+print("HDP-BPD")
+testchi22
+print("BDP-MDP")
+testchi23
+testchi24
+```
+Les différences sont toutes significatives. Graphiquement, on observe qu'il y a plus de quadrats avec une proportion importante de sol nu en bas de pente et en milieu de pente qu'en haut de pente. Il y a aussi légèrement plus de quadrats avec une part importante de sol nu au sud qu'au nord. Pour les résultats sur la topographie, il semble complémentaire de ceux sur la litière: En bas de pente, il y a moins de litière, et plus de sol nu. 
+## Étude du recouvrement en Roche
+```{r}
+donnee_roche<-table(Table_Recouvrement_Global$Placette,Table_Recouvrement_Global$Roche)
+nb_quadrat=rep(0,7)
+for (i in 0:5){
+  nb_quadrat[i]<-sum(donnee_roche[,i])
+}
+ggplot(data.frame(class_recouvre,nb_quadrat),aes(x=class_recouvre,y=nb_quadrat)) +geom_point()+ggtitle("roche ")
+```
+
+```{r}
+class_recouvre2a_roche=rep(c(0,1,2,3,4,5,6),2)
+
+donnee_roche_expo<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Roche,expo=Table_Recouvrement_Global$Exposition.approx)
+
+nb_quadrat_expo_roche=rep(0,14)
+for (i in 0:5){
+  nb_quadrat_expo_roche[i]<-sum(donnee_roche_expo[,i,expo='N'])
+}
+for (i in 7:12){
+  nb_quadrat_expo_roche[i]<-sum(donnee_roche_expo[,i-7,expo='S'])
+}
+expo=c(rep('N',7),rep('S',7))
+
+
+
+
+class_recouvre2b_roche=rep(c(0,1,2,3,4,5,6),3)
+
+donnee_roche_topo<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Roche,pos_pente=Table_Recouvrement_Global$Position_pente)
+
+nb_quadrat_roche_topo=rep(0,21)
+for (i in 0:5){
+  nb_quadrat_roche_topo[i]<-sum(donnee_roche_topo[,i,pos_pente='HDP'])
+}
+for (i in 8:12){
+  nb_quadrat_roche_topo[i]<-sum(donnee_roche_topo[,i-7,pos_pente='MDP'])
+}
+for (i in 15:19){
+  nb_quadrat_roche_topo[i]<-sum(donnee_roche_topo[,i-14,pos_pente='BDP'])
+}
+pospente=c(rep('HDP',7),rep('MDP',7),rep('BDP',7))
+```
+
+```{r}
+ggplot(data=data.frame(class_recouvre2a_roche,nb_quadrat_expo_roche,expo), aes(x=class_recouvre2a_roche , y=nb_quadrat_expo_roche, fill=expo)) +
+geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de l'exposition sur le recouvrement rocheux")
+ggplot(data=data.frame(class_recouvre2b_roche,nb_quadrat_roche_topo,pospente), aes(x=class_recouvre2b_roche , y=nb_quadrat_roche_topo, fill=pospente)) +
+geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de la topologie sur le recouvrement rocheux")
+
+```
+
+```{r}
+testchi2<-chisq.test(matrix(c(nb_quadrat_expo_roche[0:14]),ncol=2)[-c(6,7),])
+testchi2
+testchi21<-chisq.test(matrix(c(nb_quadrat_roche_topo[0:7],nb_quadrat_roche_topo[8:14]),ncol=2)[-c(6,7),])
+testchi22<-chisq.test(matrix(c(nb_quadrat_roche_topo[0:7],nb_quadrat_roche_topo[15:21]),ncol=2)[-c(6,7),])
+testchi23<-chisq.test(matrix(c(nb_quadrat_roche_topo[15:21],nb_quadrat_roche_topo[8:14]),ncol=2)[-c(6,7),])
+ 
+B<-matrix(c(nb_quadrat_roche_topo[0:7],nb_quadrat_roche_topo[8:14],nb_quadrat_roche_topo[15:21]),ncol=3)
+testchi24<-chisq.test(B[-c(6,7),])
+print("HDP-MDP")
+testchi21
+print("HDP-BPD")
+testchi22
+print("BDP-MDP")
+testchi23
+testchi24
+```
+Il y a globalement très peu de quadrats où la roche est présente, et les résultats ne sont pas significatifs, où juste faiblement (  p-value = 0.04657). De plus on a observé sur le terrain que la présence de roche semble corrélé à la pente locale, plus qu'à l'exposition, ou à la position par rapport au fond de vallée, ce qui expliquerait par exemple la différence entre le versant nord et sud, sachant que le versant sud est beaucoup plus raide.
+
+## Étude du recouvrement en Mousse
+
+```{r}
+donnee_mousse<-table(Table_Recouvrement_Global$Placette,Table_Recouvrement_Global$Mousse)
+nb_quadrat_mousse=rep(0,7)
+for (i in 0:6){
+  nb_quadrat_mousse[i]<-sum(donnee_mousse[,i])
+}
+ggplot(data.frame(class_recouvre,nb_quadrat_mousse),aes(x=class_recouvre,y=nb_quadrat_mousse)) +geom_point()+ggtitle("Mousse ")
+```
+
+```{r}
+class_recouvre2a_mousse=rep(c(0,1,2,3,4,5,6),2)
+
+
+donnee_mousse<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Mousse,expo=Table_Recouvrement_Global$Exposition.approx)
+
+nb_quadrat_expo_mousse=rep(0,14)
+for (i in 0:6){
+  nb_quadrat_expo_mousse[i]<-sum(donnee_mousse[,i,expo='N'])
+}
+for (i in 8:13){
+  nb_quadrat_expo_mousse[i]<-sum(donnee_mousse[,i-7,expo='S'])
+}
+expo=c(rep('N',7),rep('S',7))
+
+
+
+class_recouvre2b_mousse=rep(c(0,1,2,3,4,5,6),3)
+
+donnee_mousse_topo<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Mousse,pos_pente=Table_Recouvrement_Global$Position_pente)
+
+nb_quadrat_topo_mousse=rep(0,21)
+for (i in 0:6){
+  nb_quadrat_topo_mousse[i]<-sum(donnee_mousse_topo[,i,pos_pente='HDP'])
+}
+for (i in 8:13){
+  nb_quadrat_topo_mousse[i]<-sum(donnee_mousse_topo[,i-7,pos_pente='MDP'])
+}
+for (i in 15:20){
+  nb_quadrat_topo_mousse[i]<-sum(donnee_mousse_topo[,i-14,pos_pente='BDP'])
+}
+pospente=c(rep('HDP',7),rep('MDP',7),rep('BDP',7))
+```
+
+```{r}
+ggplot(data=data.frame(class_recouvre2a_mousse,nb_quadrat_expo_mousse,expo), aes(x=class_recouvre2a_mousse , y=nb_quadrat_expo_mousse, fill=expo)) +
+geom_bar(stat="identity", position=position_dodge()) 
+
+ggplot(data=data.frame(class_recouvre2b_mousse,nb_quadrat_topo_mousse,pospente), aes(x=class_recouvre2b_mousse , y=nb_quadrat_topo_mousse, fill=pospente)) +
+geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de la topologie sur le recouvrement de la mousse")
+```
+
+```{r}
+testchi2<-chisq.test(matrix(c(nb_quadrat_expo_mousse[0:14]),ncol=2)[-c(7),])
+testchi2
+testchi21<-chisq.test(matrix(c(nb_quadrat_topo_mousse[0:7],nb_quadrat_topo_mousse[8:14]),ncol=2)[-c(7),])
+testchi22<-chisq.test(matrix(c(nb_quadrat_topo_mousse[0:7],nb_quadrat_topo_mousse[15:21]),ncol=2)[-c(6,7),])
+testchi23<-chisq.test(matrix(c(nb_quadrat_topo_mousse[15:21],nb_quadrat_topo_mousse[8:14]),ncol=2)[-c(1,7),])
+
+B<-matrix(c(nb_quadrat_topo_mousse[0:6],nb_quadrat_topo_mousse[8:14],nb_quadrat_topo_mousse[15:21]),ncol=3)
+testchi24<-chisq.test(B[-6,])
+print("HDP-MDP")
+testchi21
+print("HDP-BPD")
+testchi22
+print("BDP-MDP")
+testchi23
+testchi24
+```
+Les différences ne sont pas significative, sauf entre le haut et le milieu de pente. La distribution des recouvrement est plus large pour le milieu de pente, et globalement, il y a plus de quadrats présentant une proportion importante de mousse en milieu de pente. On peut supposer que cela est du à une différence d'humidité entre le haut et le bas de pente. Peut être que le haut de pente est plus soumis au vent, fort dans cette région.( ce n'est qu'une hypothèse).
+
+## Étude du recouvrement Herbacé
+```{r}
+donnee_herbace<-table(Table_Recouvrement_Global$Placette,Table_Recouvrement_Global$Herbacé)
+nb_quadrat_herbace=rep(0,7)
+for (i in 0:7){
+  nb_quadrat_herbace[i]<-sum(donnee_herbace[,i])
+}
+ggplot(data.frame(class_recouvre,nb_quadrat_herbace),aes(x=class_recouvre,y=nb_quadrat_herbace)) +geom_point()+ggtitle("Herbacée ")
+
+```
+
+```{r}
+class_recouvre2a_herbace=rep(c(0,1,2,3,4,5,6),2)
+
+
+donnee_herbace_expo<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Herbacé,expo=Table_Recouvrement_Global$Exposition.approx)
+
+nb_quadrat_herbace_expo=rep(0,14)
+for (i in 0:7){
+  nb_quadrat_herbace_expo[i]<-sum(donnee_herbace_expo[,i,expo='N'])
+}
+for (i in 8:14){
+  nb_quadrat_herbace_expo[i]<-sum(donnee_herbace_expo[,i-7,expo='S'])
+}
+expo=c(rep('N',7),rep('S',7))
+```
+
+```{r}
+class_recouvre2b_herbace=rep(c(0,1,2,3,4,5,6),3)
+
+
+donnee_herbace_topo<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Herbacé,pos_pente=Table_Recouvrement_Global$Position_pente)
+
+nb_quadrat_herbace_topo=rep(0,21)
+for (i in 0:7){
+  nb_quadrat_herbace_topo[i]<-sum(donnee_herbace_topo[,i,pos_pente='HDP'])
+}
+for (i in 8:14){
+  nb_quadrat_herbace_topo[i]<-sum(donnee_herbace_topo[,i-7,pos_pente='MDP'])
+}
+for (i in 15:21){
+  nb_quadrat_herbace_topo[i]<-sum(donnee_herbace_topo[,i-14,pos_pente='BDP'])
+}
+pospente=c(rep('HDP',7),rep('MDP',7),rep('BDP',7))
+```
+```{r}
+ggplot(data=data.frame(class_recouvre2a_herbace,nb_quadrat_herbace_expo,expo), aes(x=class_recouvre2a_herbace , y=nb_quadrat_herbace_expo, fill=expo)) +
+geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de l'exposition sur le recouvrement herbacé")
+
+ggplot(data=data.frame(class_recouvre2b_herbace,nb_quadrat_herbace_topo,pospente), aes(x=class_recouvre2b_herbace , y=nb_quadrat_herbace_topo, fill=pospente)) +
+geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de la topologie sur le recouvrement herbacé")
+
+```
+
+```{r}
+testchi2<-chisq.test(matrix(c(nb_quadrat_herbace_expo[0:14]),ncol=2))
+testchi2
+
+testchi21<-chisq.test(matrix(c(nb_quadrat_herbace_topo[0:7],nb_quadrat_herbace_topo[8:14]),ncol=2))
+testchi22<-chisq.test(matrix(c(nb_quadrat_herbace_topo[0:7],nb_quadrat_herbace_topo[15:21]),ncol=2))
+testchi23<-chisq.test(matrix(c(nb_quadrat_herbace_topo[15:21],nb_quadrat_herbace_topo[8:14]),ncol=2)[-c(1),])
+
+B<-matrix(c(nb_quadrat_herbace_topo[0:7],nb_quadrat_herbace_topo[8:14],nb_quadrat_herbace_topo[15:21]),ncol=3)
+testchi24<-chisq.test(B)
+print("HDP-MDP")
+testchi21
+print("HDP-BPD")
+testchi22
+print("BDP-MDP")
+testchi23
+testchi24
+```
+Les résultats ne sont pas significatifs en fonction du versant, ni entre le haut et le milieu de pente ( ce qui concorde avec d'autres résultats montrant que ces 2 strates peuvent souvent être confondues pour les herbacées).
+On observe que la distribution est beaucoup moins étalé pour le bas de pente par rapport aux autres, et il y a globalement beaucoup plus de quadrats avec un recouvrement de 6 en bas de pente. Cela peut expliquer par exemple qu'on ne trouve que peu de mousse en bas de pente, alors que c'est un milieu qui semble être plus humide: la strate herbacée prend la place et capte toute la lumière. Au niveau du sol, ce sont les herbacées en bas de pente qui sont largement dominant. On peut supposer que cela est du à l'humidité qui doit être plus importante au fond du vallon, permettant aux herbacées de proliférer rapidement.
+
+## Étude du recouvrement Arbustif
+```{r}
+donnee_arbustif<-table(Table_Recouvrement_Global$Placette,Table_Recouvrement_Global$Arbustif)
+nb_quadrat_arbustif=rep(0,7)
+for (i in 0:7){
+  nb_quadrat_arbustif[i]<-sum(donnee_arbustif[,i])
+}
+ggplot(data.frame(class_recouvre,nb_quadrat_arbustif),aes(x=class_recouvre,y=nb_quadrat_arbustif)) +geom_point()+ggtitle("Arbustif ")
+```
+
+```{r}
+class_recouvre2a_arbustif=rep(c(0,1,2,3,4,5,6),2)
+
+
+donnee_arbustif_expo<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Arbustif,expo=Table_Recouvrement_Global$Exposition.approx)
+
+nb_quadrat_arbustif_expo=rep(0,14)
+for (i in 0:7){
+  nb_quadrat_arbustif_expo[i]<-sum(donnee_arbustif_expo[,i,expo='N'])
+}
+for (i in 8:14){
+  nb_quadrat_arbustif_expo[i]<-sum(donnee_arbustif_expo[,i-7,expo='S'])
+}
+expo=c(rep('N',7),rep('S',7))
+```
+
+```{r}
+class_recouvre2b_arbustif=rep(c(0,1,2,3,4,5,6),3)
+
+
+donnee_arbustif_topo<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Arbustif,pos_pente=Table_Recouvrement_Global$Position_pente)
+
+nb_quadrat_arbustif_topo=rep(0,21)
+for (i in 0:7){
+  nb_quadrat_arbustif_topo[i]<-sum(donnee_arbustif_topo[,i,pos_pente='HDP'])
+}
+for (i in 8:14){
+  nb_quadrat_arbustif_topo[i]<-sum(donnee_arbustif_topo[,i-7,pos_pente='MDP'])
+}
+for (i in 15:21){
+  nb_quadrat_arbustif_topo[i]<-sum(donnee_arbustif_topo[,i-14,pos_pente='BDP'])
+}
+pospente=c(rep('HDP',7),rep('MDP',7),rep('BDP',7))
+```
+
+```{r présentation graphique}
+ggplot(data=data.frame(class_recouvre2a_arbustif,nb_quadrat_arbustif_expo,expo), aes(x=class_recouvre2a_arbustif , y=nb_quadrat_arbustif_expo, fill=expo)) +
+geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de l'exposition sur le recouvrement arbustif")
+
+ggplot(data=data.frame(class_recouvre2b_arbustif,nb_quadrat_arbustif_topo,pospente), aes(x=class_recouvre2b_arbustif , y=nb_quadrat_arbustif_topo, fill=pospente)) +
+geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de la topologie sur le recouvrement arbustif")
+```
+
+```{r}
+testchi2<-chisq.test(matrix(c(nb_quadrat_arbustif_expo[0:14]),ncol=2))
+testchi2
+
+testchi21<-chisq.test(matrix(c(nb_quadrat_arbustif_topo[0:7],nb_quadrat_arbustif_topo[8:14]),ncol=2))
+testchi22<-chisq.test(matrix(c(nb_quadrat_arbustif_topo[0:7],nb_quadrat_arbustif_topo[15:21]),ncol=2))
+testchi23<-chisq.test(matrix(c(nb_quadrat_arbustif_topo[15:21],nb_quadrat_arbustif_topo[7:14]),ncol=2))
+
+B<-matrix(c(nb_quadrat_arbustif_topo[0:7],nb_quadrat_arbustif_topo[8:14],nb_quadrat_arbustif_topo[15:21]),ncol=3)
+testchi24<-chisq.test(B)
+print("HDP-MDP")
+testchi21
+print("HDP-BPD")
+testchi22
+print("BDP-MDP")
+testchi23
+testchi24
+```
+On observe qu'il y a une grande part des quadrats au nord qui ont très peu ou pas d'arbustes, alors que ce n'est pas le cas au sud ( courbe bimodal VS unimodal). Au sud, on a observé que la végétation semble plus méditerranéenne, alors qu'au nord elle semble classique des forêts tempérés d'europe ( voir suite). Cela expliquerait ces différences de recouvrement, avec un versant sud méditerranéen ou la strate arbustive est beaucoup plus importante. ( il y a de nombreux buisson adapté au manque d'eau et à la chaleur: plante xérophyte...)
+Il n'y a pas de différence significative au niveau de la topographie.
+
+## Étude du recouvrement Arboré
+
+```{r}
+donnee_arbore<-table(Table_Recouvrement_Global$Placette,Table_Recouvrement_Global$Arboré)
+nb_quadrat_arbore=rep(0,7)
+nb_quadrat_arbore[1]<-sum(donnee_arbore[,1])
+for (i in c(3:7)){
+  nb_quadrat_arbore[i]<-sum(donnee_arbore[,i-1])
+}
+ggplot(data.frame(class_recouvre,nb_quadrat_arbore),aes(x=class_recouvre,y=nb_quadrat_arbore)) +geom_point()+ggtitle("Arboré ")
+```
+
+```{r}
+class_recouvre2a_arbore=rep(c(0,1,2,3,4,5,6),2)
+
+
+donnee_arbore_expo<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Arboré,expo=Table_Recouvrement_Global$Exposition.approx)
+
+nb_quadrat_arbore_expo=rep(0,14)
+
+
+nb_quadrat_arbore_expo[1]<-sum(donnee_arbore_expo[,1,expo='N'])
+for (i in 3:7){
+  nb_quadrat_arbore_expo[i]<-sum(donnee_arbore_expo[,i-1,expo='N'])
+}
+nb_quadrat_arbore_expo[8]<-sum(donnee_arbore_expo[,1,expo='S'])
+for (i in 10:14){
+  nb_quadrat_arbore_expo[i]<-sum(donnee_arbore_expo[,i-8,expo='S'])
+}
+expo=c(rep('N',7),rep('S',7))
+```
+
+```{r}
+class_recouvre2b_arbore=rep(c(0,1,2,3,4,5,6),3)
+
+
+donnee_arbore_topo<-table(placette=Table_Recouvrement_Global$Placette,recouvrement=Table_Recouvrement_Global$Arboré,pos_pente=Table_Recouvrement_Global$Position_pente)
+
+nb_quadrat_arbore_topo=rep(0,21)
+
+nb_quadrat_arbore_topo[1]<-sum(donnee_arbore_topo[,1,pos_pente='HDP'])
+for (i in 3:7){
+  nb_quadrat_arbore_topo[i]<-sum(donnee_arbore_topo[,i-1,pos_pente='HDP'])
+}
+
+ nb_quadrat_arbore_topo[8]<-sum(donnee_arbore_topo[,1,pos_pente='MDP'])
+ 
+for (i in 10:14){
+  nb_quadrat_arbore_topo[i]<-sum(donnee_arbore_topo[,i-8,pos_pente='MDP'])
+}
+ 
+nb_quadrat_arbore_topo[15]<-sum(donnee_arbore_topo[,1,pos_pente='BDP'])
+for (i in 17:21){
+  nb_quadrat_arbore_topo[i]<-sum(donnee_arbore_topo[,i-15,pos_pente='BDP'])
+}
+pospente=c(rep('HDP',7),rep('MDP',7),rep('BDP',7))
+```
+
+```{r}
+ggplot(data=data.frame(class_recouvre2a_arbore,nb_quadrat_arbore_expo,expo), aes(x=class_recouvre2a_arbore , y=nb_quadrat_arbore_expo, fill=expo)) +
+geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de l'exposition sur le recouvrement arboré")
+
+ggplot(data=data.frame(class_recouvre2b_arbore,nb_quadrat_arbore_topo,pospente), aes(x=class_recouvre2b_arbore , y=nb_quadrat_arbore_topo, fill=pospente)) +
+geom_bar(stat="identity", position=position_dodge()) +ggtitle("Influence de la topologie sur le recouvrement arboré")
+```
+
+```{r}
+testchi2<-chisq.test(matrix(c(nb_quadrat_arbore_expo[0:14]),ncol=2)[-c(2)])
+testchi2
+
+testchi21<-chisq.test(matrix(c(nb_quadrat_arbore_topo[0:7],nb_quadrat_arbore_topo[8:14]),ncol=2)[-c(2)])
+testchi22<-chisq.test(matrix(c(nb_quadrat_arbore_topo[0:7],nb_quadrat_arbore_topo[15:21]),ncol=2)[-c(2)])
+testchi23<-chisq.test(matrix(c(nb_quadrat_arbore_topo[15:21],nb_quadrat_arbore_topo[8:14]),ncol=2)[-c(1)])
+
+B<-matrix(c(nb_quadrat_arbore_topo[0:7],nb_quadrat_arbore_topo[8:14],nb_quadrat_arbore_topo[15:2]),ncol=3)
+testchi24<-chisq.test(B[-c(1)])
+print("HDP-MDP")
+testchi21
+print("HDP-BPD")
+testchi22
+print("BDP-MDP")
+testchi23
+testchi24
+```
+Toutes les différences sont significatives, cependant, il y a peu de quadrats où le recouvrement arboré n'est pas de 6. Il semble donc difficile de tirer une conclusion sur si peu de valeurs
+.
+## ACP
+Ensuite, on fait une ACP pour voir si les quadrats se regroupe entre placette, et en fonction de la position de la placette, et pour voir qu'elle est la variable qui explique le plus la dispersion des quadrats.
+
+```{r}
+L=paste(Table_Recouvrement_Global$Placette, Table_Recouvrement_Global$Quadrat)
+
+data_acp=data.frame(Table_Recouvrement_Global$Litière,Table_Recouvrement_Global$Sol.Nu,Table_Recouvrement_Global$Roche,Table_Recouvrement_Global$Mousse,Table_Recouvrement_Global$Herbacé,Table_Recouvrement_Global$Arbustif,Table_Recouvrement_Global$Arboré)
+rownames(data_acp)=L
+acp<-dudi.pca(data_acp,scale=F,scannf=F,nf=5)
+s.label(acp$li, xax = 1, yax = 2)
+gcol <- c("red", "blue","yellow","purple","green","black", "blue3","blue4","brown1","brown3","brown4","grey","gold")
+
+s.class(dfxy = acp$li, fac = as.factor(Table_Recouvrement_Global$Placette), col = gcol, xax = 1, yax = 2)
+s.corcircle(acp$co,xax=1,yax=2)
+
+s.label(acp$li, xax = 1, yax = 3)
+s.label(acp$li, xax = 2, yax = 3)
+s.label(acp$li, xax = 1, yax = 4)
+s.label(acp$li, xax = 1, yax = 5)
+
+
+
+
+
+```
+La variance intra placette semble très important, ce qui fait qu'elles ne semblent pas très individualisées.Les variables les plus discriminantes semblent être le recouvrement arbustif, de la mousse et de la litière.
+
+```{r}
+s.class(dfxy = acp$li, fac = as.factor(Table_Recouvrement_Global$Exposition.approx), col = gcol, xax = 1, yax = 2)
+```
+La variance semble beaucoup plus importante en versant nord qu'en versant sud. Cependant les 2 groupes ne sont pas séparés avec une acp. ( voir discriminante)
+
+```{r}
+s.class(dfxy = acp$li, fac = as.factor(Table_Recouvrement_Global$Position_pente), col = gcol, xax = 1, yax = 2)
+```
+On observe que la répartition des quadrats en milieu de pente et en haut de pente est relativement semblables, alors que celle du bas de pente est très différente, ce qui confirme ce que l'on avait déjà vu simplement pour les herbacées: le haut et le milieu de pente on des recouvrements relativement semblable à quelque nuances près, mais le bas de pente se distingue plus fortement. 
+
+```{r}
+L1=paste(Table_Recouvrement_Global$Exposition.approx, Table_Recouvrement_Global$Position_pente)
+s.class(dfxy = acp$li, fac = as.factor(L1), col = gcol, xax = 1, yax = 2)
+
+```
+On observe que les quadrats au nord en milieu et haut de pente semblent formé une catégorie à part du reste. L'effet du versant nord est donc visible qu'en milieu et haut de pente.
+```{r}
+s.class(dfxy = acp$li, fac = as.factor(Table_Recouvrement_Global$Gd_Placette), col = gcol, xax = 1, yax = 2)
+```
+On observe que la variance intra placettes est très grandes, ce qui explique que les résultats observés pour les autres acp soit difficile à interpréter.
+
+
+## Etude complémentaire à l'aide de discriminante
+```{r}
+discr<-discrimin(acp,as.factor(Table_Recouvrement_Global$Exposition.approx),scannf=F,nf=7)
+plot(discr)
+```
+
+La discriminante ne permet pas de séparer bien plus les catégories nord et sud que l'ACP. Ce sont bien des catégories qui semblent légèrement distinctes, malgré un recoupement important.
+```{r}
+discr<-discrimin(acp,as.factor(Table_Recouvrement_Global$Position_pente),scannf=F,nf=7)
+plot(discr)
+```
+
+Même chose que pour les versant nord: il n'y a pas de grandes différences par rapport à l'ACP. Il semble que le recouvrement de la mousse permettent de discriminer le milieu de pente du reste, et celui de la litière ( et dans une moindre mesure le recouvrement arbustif)  permet de discriminer le haut de pente.
+```{r}
+discr<-discrimin(acp,as.factor(L1),scannf=F,nf=7)
+plot(discr)
+```
+L'analyse discriminante permet de séparer les quadrats sud en haut de pente du reste, par rapport à l'ACP. Il y a donc trois groupes différent en terme de recouvrement: le Sud haut de pent, l'ensemble sud bas, milieu de pente et nord bas de pente, et enfin, l'ensemble nord milieu et haut de pente. ( peut être aurait il fallu analyser plus précisément les pentes précises des quadrats pour comprendre pourquoi on arrive à discriminer le recouvrement en haut de pente au sud et pas au nord).
+```{r}
+
+discr<-discrimin(acp,as.factor(Table_Recouvrement_Global$Gd_Placette),scannf=F,nf=7)
+plot(discr)
+```
+même chose qu'avant : la variance intra placette semble très grande, ce que l'on va vérifier à l'aide des analyses bca.
+## Analyse bca : permet d'expliquer quel part de la variance total est expliqué par le facteur auquel on s'intéresse ( l'exposition...)
+
+effet des placettes
+```{r}
+bca(acp,as.factor(Table_Recouvrement_Global$Gd_Placette),scannf=F,nf=7)
+wca(acp,as.factor(Table_Recouvrement_Global$Gd_Placette),scannf=F,nf=7)
+
+```
+le regroupement en placettes n'explique qu'environ 30% de la variance total entre quadrats. Il y a donc 70% de variance intra placettes. La création des catégories en fonction de l'exposition et de la topographie ne peut donc expliquer qu'au maximum 30% de la variance total, puisque le reste est intra placettes.
+
+effet des sous placettes
+```{r}
+bca(acp,as.factor(Table_Recouvrement_Global$Placette),scannf=F,nf=7)
+
+```
+On observe que la plus part de la variance est expliqué par la variation intraplacette
+
+effet de l'exposition
+```{r}
+bca(acp,as.factor(Table_Recouvrement_Global$Exposition.approx),scannf=F,nf=7)
+
+
+```
+Le regroupement en fonction du versant n'explique que 4% de la variance total, ce qui explique que les analyses au dessus semblait peut concluante.
+effet de la topographie
+```{r}
+bca(acp,as.factor(Table_Recouvrement_Global$Position_pente),scannf=F,nf=7)
+
+```
+même chose : le regroupement en fonction de la pente n'explique que 5% de la variance total.
+effet de l'exposition combiné à la topographie
+```{r}
+bca(acp,as.factor(L1),scannf=F,nf=7)
+
+
+```
+L'interaction entre la topographie et l'exposition explique 12% de la variance total, ce qui est plus que la somme des deux réunies. Il semble donc qu'il y ait bien une interaction importante. Ces catégories ont donc bien un sens biologiques ( l'effet du sud milieu de pente est supérieur à l'effet du versant sud plus celui du milieu de pente).
+Cependant, la part de variance expliqué reste faible,à cause de la variance intraplacettes.
+## robustesse de l'analyse : v ratio
+exposition
+```{r}
+fshuffle=function()
+{
+  facshuf <-sample(as.factor(Table_Recouvrement_Global$Exposition.approx))
+  discr<-discrimin(acp,facshuf,scannf=F,nf=7)
+  ratio <- sum(discr$eig)/sum(acp$eig)
+  return(ratio)
+}
+discr<-discrimin(acp,as.factor(Table_Recouvrement_Global$Exposition.approx),scannf=F,nf=7)
+
+vratio <- sapply(1:1000,function(x){fshuffle()})
+hist(vratio,xlim=c(0,0.02))
+truevalue=sum(discr$eig)/sum(acp$eig)
+abline(v=truevalue)
+1-table(truevalue>vratio)[2]/sum(table(truevalue>vratio))
+
+
+
+```
+p value<1/1000
+
+```{r}
+fshuffle=function()
+{
+  facshuf <-sample(as.factor(Table_Recouvrement_Global$Gd_Placette))
+  discr<-discrimin(acp,facshuf,scannf=F,nf=7)
+  ratio <- sum(discr$eig)/sum(acp$eig)
+  return(ratio)
+}
+discr<-discrimin(acp,as.factor(Table_Recouvrement_Global$Gd_Placette),scannf=F,nf=7)
+
+vratio <- sapply(1:1000,function(x){fshuffle()})
+hist(vratio,xlim=c(0,0.15))
+truevalue=sum(discr$eig)/sum(acp$eig)
+abline(v=truevalue)
+1-table(truevalue>vratio)[2]/sum(table(truevalue>vratio))
+
+```
+
+```{r}
+fshuffle=function()
+{
+  facshuf <-sample(as.factor(Table_Recouvrement_Global$Position_pente))
+  discr<-discrimin(acp,facshuf,scannf=F,nf=7)
+  ratio <- sum(discr$eig)/sum(acp$eig)
+  return(ratio)
+}
+discr<-discrimin(acp,as.factor(Table_Recouvrement_Global$Position_pente),scannf=F,nf=7)
+
+vratio <- sapply(1:1000,function(x){fshuffle()})
+hist(vratio,xlim=c(0,0.025))
+truevalue=sum(discr$eig)/sum(acp$eig)
+abline(v=truevalue)
+1-table(truevalue>vratio)[2]/sum(table(truevalue>vratio))
+
+```
+interaction topographie exposition
+```{r}
+fshuffle=function()
+{
+  facshuf <-sample(as.factor(L1))
+  discr<-discrimin(acp,facshuf,scannf=F,nf=7)
+  ratio <- sum(discr$eig)/sum(acp$eig)
+  return(ratio)
+}
+discr<-discrimin(acp,as.factor(L1),scannf=F,nf=7)
+
+vratio <- sapply(1:1000,function(x){fshuffle()})
+hist(vratio,xlim=c(0,0.055))
+truevalue=sum(discr$eig)/sum(acp$eig)
+abline(v=truevalue)
+1-table(truevalue>vratio)[2]/sum(table(truevalue>vratio))
+
+```
+Toutes les p values sont inférieures à 1/1000. Ainsi, les regroupements de quadrats en fonction de la topographie et/ ou de l'exposition forment un ensemble plus cohérent que ce que ne le ferait le hasard. Bien qu'une faible part de la variance soit expliquer par ces regroupements, ceux ci sont robustes, et correspondent bien à une certaine similarité des quadrats regroupés. 
+
+
+
+# Analyse quantitative sur le recouvrement
+
+## Introduction
+
+
+Il s'agit de réorgéniser les données en vu de leur étude et leur analyse. 
+
+### Tri des placettes selon leur caractéristique
+```{r tri}
+placet<-c()
+topo<-c()
+expo<-c()
+vallon<-c()
+for (k in 1:5){
+  placet<-c(placet,'P1.1')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P1.2')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P2.1')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P2.2')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P3.1')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P3.2')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P4.1')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P4.2')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P5.1')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P5.2')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P6.1')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P6.2')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P7.1')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeLacure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P7.2')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeLacure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P8.1')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeLacure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P8.2')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeLacure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P9.1')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeLacure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P9.2')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeLacure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P10.1')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeLacure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P10.2')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeLacure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P11.1')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeLacure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P11.2')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeLacure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P12.1')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeLacure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P12.2')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeLacure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P14.1')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P14.2')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'N')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P16.1')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P16.2')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P17.1')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P17.2')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'S')
+  vallon<-c(vallon,'BoisdeMontrond')
+}
+```
+
+## Création d'un tableau récapitulatif des caractéristiques des Placettes 
+
+```{r tableau recapitulatif}
+df<-data.frame(
+  placette = placet,
+  topographie = topo,
+  exposition = expo,
+  Vallon=vallon
+)
+dfcomplet<-cbind(df,Table_Recouvrement_Global$Herbacé,Table_Recouvrement_Global$Arbustif,Table_Recouvrement_Global$Arboré)
+
+datatable(dfcomplet)
+
+```
+
+##   Etude des recouvrements globaux
+
+### Création des tables de moyennes de recouvrement par strate
+
+Pour chaque placette on détermine son orientation, son emplacement sur la pente et sur quelle vallon elle se situe avant de faire la moyenne des valeurs de recouvrement sur chaque quadrat pour chaque strate. 
+
+```{r Création des tables de recouvrement global par strate}
+
+TableRecouvrementHerbace<-data.frame(Placette=character(),Moyennes=numeric(),Exposition=character(),Pente=character(),Vallon=character())
+TableRecouvrementArbustif<-data.frame(Placette=character(),Moyennes=numeric(),Exposition=character(),Pente=character(),Vallon=character())
+TableRecouvrementArbore<-data.frame(Placette=character(),Moyennes=numeric(),Exposition=character(),Pente=character(),Vallon=character())
+i<-seq(1,160,by=5)
+for (k in (1:32)){
+  if ((dfcomplet$placette[(i[k]+4)])%in%(dfcomplet[dfcomplet$exposition=="N"& dfcomplet$topographie=="HDP"&dfcomplet$Vallon=="BoisdeMontrond",]$placette)){
+    A1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Herbacé'[i[k]:(i[k]+4)])
+    A2<-sum(A1)/length(A1)
+    B1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arbustif'[i[k]:(i[k]+4)])
+    B2<-sum(B1)/length(B1)
+    C1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arboré'[i[k]:(i[k]+4)])
+    C2<-sum(C1)/length(C1)
+    TableRecouvrementHerbace[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(A2),"Nord","HDP","BoisdeMontrond")
+    TableRecouvrementArbustif[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(B2),"Nord","HDP","BoisdeMontrond")
+    TableRecouvrementArbore[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(C2),"Nord","HDP","BoisdeMontrond")
+  }
+  else if((dfcomplet$placette[(i[k]+4)])%in%(dfcomplet[dfcomplet$exposition=="S"& dfcomplet$topographie=="HDP"&dfcomplet$Vallon=="BoisdeMontrond",]$placette)){
+    A1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Herbacé'[i[k]:(i[k]+4)])
+    A2<-sum(A1)/length(A1)
+    B1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arbustif'[i[k]:(i[k]+4)])
+    B2<-sum(B1)/length(B1)
+    C1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arboré'[i[k]:(i[k]+4)])
+    C2<-sum(C1)/length(C1)
+    TableRecouvrementHerbace[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(A2),"Sud","HDP","BoisdeMontrond")
+    TableRecouvrementArbustif[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(B2),"Sud","HDP","BoisdeMontrond")
+    TableRecouvrementArbore[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(C2),"Sud","HDP","BoisdeMontrond")
+
+  }
+  else if((dfcomplet$placette[(i[k]+4)])%in%(dfcomplet[dfcomplet$exposition=="S"& dfcomplet$topographie=="BDP"&dfcomplet$Vallon=="BoisdeMontrond",]$placette)){
+    A1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Herbacé'[i[k]:(i[k]+4)])
+    A2<-sum(A1)/length(A1)
+    B1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arbustif'[i[k]:(i[k]+4)])
+    B2<-sum(B1)/length(B1)
+    C1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arboré'[i[k]:(i[k]+4)])
+    C2<-sum(C1)/length(C1)
+    TableRecouvrementHerbace[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(A2),"Sud","BDP","BoisdeMontrond")
+    TableRecouvrementArbustif[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(B2),"Sud","BDP","BoisdeMontrond")
+    TableRecouvrementArbore[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(C2),"Sud","BDP","BoisdeMontrond")
+
+  }
+  else if((dfcomplet$placette[(i[k]+4)])%in%(dfcomplet[dfcomplet$exposition=="S"& dfcomplet$topographie=="MDP"&dfcomplet$Vallon=="BoisdeMontrond",]$placette)){
+    A1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Herbacé'[i[k]:(i[k]+4)])
+    A2<-sum(A1)/length(A1)
+    B1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arbustif'[i[k]:(i[k]+4)])
+    B2<-sum(B1)/length(B1)
+    C1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arboré'[i[k]:(i[k]+4)])
+    C2<-sum(C1)/length(C1)
+    TableRecouvrementHerbace[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(A2),"Sud","MDP","BoisdeMontrond")
+    TableRecouvrementArbustif[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(B2),"Sud","MDP","BoisdeMontrond")
+    TableRecouvrementArbore[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(C2),"Sud","MDP","BoisdeMontrond")
+
+  }
+  else if((dfcomplet$placette[(i[k]+4)])%in%(dfcomplet[dfcomplet$exposition=="N"& dfcomplet$topographie=="BDP"&dfcomplet$Vallon=="BoisdeMontrond",]$placette)){
+    A1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Herbacé'[i[k]:(i[k]+4)])
+    A2<-sum(A1)/length(A1)
+    B1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arbustif'[i[k]:(i[k]+4)])
+    B2<-sum(B1)/length(B1)
+    C1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arboré'[i[k]:(i[k]+4)])
+    C2<-sum(C1)/length(C1)
+    TableRecouvrementHerbace[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(A2),"Nord","BDP","BoisdeMontrond")
+    TableRecouvrementArbustif[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(B2),"Nord","BDP","BoisdeMontrond")
+    TableRecouvrementArbore[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(C2),"Nord","BDP","BoisdeMontrond")
+
+  }
+  else if((dfcomplet$placette[(i[k]+4)])%in%(dfcomplet[dfcomplet$exposition=="N"& dfcomplet$topographie=="MDP"&dfcomplet$Vallon=="BoisdeMontrond",]$placette)){
+    A1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Herbacé'[i[k]:(i[k]+4)])
+    A2<-sum(A1)/length(A1)
+    B1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arbustif'[i[k]:(i[k]+4)])
+    B2<-sum(B1)/length(B1)
+    C1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arboré'[i[k]:(i[k]+4)])
+    C2<-sum(C1)/length(C1)
+    TableRecouvrementHerbace[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(A2),"Nord","MDP","BoisdeMontrond")
+    TableRecouvrementArbustif[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(B2),"Nord","MDP","BoisdeMontrond")
+    TableRecouvrementArbore[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(C2),"Nord","MDP","BoisdeMontrond")
+  }
+  else if ((dfcomplet$placette[(i[k]+4)])%in%(dfcomplet[dfcomplet$exposition=="N"& dfcomplet$topographie=="HDP"&dfcomplet$Vallon=="BoisdeLacure",]$placette)){
+    A1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Herbacé'[i[k]:(i[k]+4)])
+    A2<-sum(A1)/length(A1)
+    B1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arbustif'[i[k]:(i[k]+4)])
+    B2<-sum(B1)/length(B1)
+    C1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arboré'[i[k]:(i[k]+4)])
+    C2<-sum(C1)/length(C1)
+    TableRecouvrementHerbace[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(A2),"Nord","HDP","BoisdeLacure")
+    TableRecouvrementArbustif[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(B2),"Nord","HDP","BoisdeLacure")
+    TableRecouvrementArbore[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(C2),"Nord","HDP","BoisdeLacure")
+  }
+  else if((dfcomplet$placette[(i[k]+4)])%in%(dfcomplet[dfcomplet$exposition=="S"& dfcomplet$topographie=="HDP"&dfcomplet$Vallon=="BoisdeLacure",]$placette)){
+    A1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Herbacé'[i[k]:(i[k]+4)])
+    A2<-sum(A1)/length(A1)
+    B1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arbustif'[i[k]:(i[k]+4)])
+    B2<-sum(B1)/length(B1)
+    C1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arboré'[i[k]:(i[k]+4)])
+    C2<-sum(C1)/length(C1)
+    TableRecouvrementHerbace[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(A2),"Sud","HDP","BoisdeLacure")
+    TableRecouvrementArbustif[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(B2),"Sud","HDP","BoisdeLacure")
+    TableRecouvrementArbore[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(C2),"Sud","HDP","BoisdeLacure")
+
+  }
+  else if((dfcomplet$placette[(i[k]+4)])%in%(dfcomplet[dfcomplet$exposition=="S"& dfcomplet$topographie=="BDP"&dfcomplet$Vallon=="BoisdeLacure",]$placette)){
+    A1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Herbacé'[i[k]:(i[k]+4)])
+    A2<-sum(A1)/length(A1)
+    B1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arbustif'[i[k]:(i[k]+4)])
+    B2<-sum(B1)/length(B1)
+    C1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arboré'[i[k]:(i[k]+4)])
+    C2<-sum(C1)/length(C1)
+    TableRecouvrementHerbace[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(A2),"Sud","BDP","BoisdeLacure")
+    TableRecouvrementArbustif[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(B2),"Sud","BDP","BoisdeLacure")
+    TableRecouvrementArbore[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(C2),"Sud","BDP","BoisdeLacure")
+
+  }
+  else if((dfcomplet$placette[(i[k]+4)])%in%(dfcomplet[dfcomplet$exposition=="S"& dfcomplet$topographie=="MDP"&dfcomplet$Vallon=="BoisdeLacure",]$placette)){
+    A1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Herbacé'[i[k]:(i[k]+4)])
+    A2<-sum(A1)/length(A1)
+    B1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arbustif'[i[k]:(i[k]+4)])
+    B2<-sum(B1)/length(B1)
+    C1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arboré'[i[k]:(i[k]+4)])
+    C2<-sum(C1)/length(C1)
+    TableRecouvrementHerbace[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(A2),"Sud","MDP","BoisdeLacure")
+    TableRecouvrementArbustif[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(B2),"Sud","MDP","BoisdeLacure")
+    TableRecouvrementArbore[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(C2),"Sud","MDP","BoisdeLacure")
+
+  }
+  else if((dfcomplet$placette[(i[k]+4)])%in%(dfcomplet[dfcomplet$exposition=="N"& dfcomplet$topographie=="BDP"&dfcomplet$Vallon=="BoisdeLacure",]$placette)){
+    A1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Herbacé'[i[k]:(i[k]+4)])
+    A2<-sum(A1)/length(A1)
+    B1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arbustif'[i[k]:(i[k]+4)])
+    B2<-sum(B1)/length(B1)
+    C1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arboré'[i[k]:(i[k]+4)])
+    C2<-sum(C1)/length(C1)
+    TableRecouvrementHerbace[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(A2),"Nord","BDP","BoisdeLacure")
+    TableRecouvrementArbustif[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(B2),"Nord","BDP","BoisdeLacure")
+    TableRecouvrementArbore[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(C2),"Nord","BDP","BoisdeLacure")
+
+  }
+  else if((dfcomplet$placette[(i[k]+4)])%in%(dfcomplet[dfcomplet$exposition=="N"& dfcomplet$topographie=="MDP"&dfcomplet$Vallon=="BoisdeLacure",]$placette)){
+    A1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Herbacé'[i[k]:(i[k]+4)])
+    A2<-sum(A1)/length(A1)
+    B1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arbustif'[i[k]:(i[k]+4)])
+    B2<-sum(B1)/length(B1)
+    C1<-as.numeric(dfcomplet$'Table_Recouvrement_Global$Arboré'[i[k]:(i[k]+4)])
+    C2<-sum(C1)/length(C1)
+    TableRecouvrementHerbace[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(A2),"Nord","MDP","BoisdeLacure")
+    TableRecouvrementArbustif[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(B2),"Nord","MDP","BoisdeLacure")
+    TableRecouvrementArbore[k,]<-c(dfcomplet$placette[(i[k]+4)],as.numeric(C2),"Nord","MDP","BoisdeLacure")
+
+  }
+}
+
+
+TableRecouvrementHerbace$Moyennes=as.numeric(TableRecouvrementHerbace$Moyennes)
+TableRecouvrementArbustif$Moyennes=as.numeric(TableRecouvrementArbustif$Moyennes)
+TableRecouvrementArbore$Moyennes=as.numeric(TableRecouvrementArbore$Moyennes)
+
+datatable(TableRecouvrementHerbace)
+datatable(TableRecouvrementArbustif)
+datatable(TableRecouvrementArbore)
+
+```
+###    Représentation des données obtenues
+
+On peut représenter les distribution des moyennes obtenues sous forme de Boxplot pour essayer de qualifier l'effet de chaque paramètre sur le recouvrement des placettes. 
+
+####   Boxplot du recouvrement global herbacé selon les caractéristiques considérées
+```{r représentation Recouvrement Herbace}
+ggplot(TableRecouvrementHerbace,aes(x=Exposition,y=Moyennes, color=Exposition))+geom_boxplot()+ggtitle('Influence de l exposition Nord-Sud sur le recouvrement global Herbace')+ylab('Moyennes recouvrement herbacé pour chaque placette')
+
+ggplot(TableRecouvrementHerbace,aes(x=Pente,y=Moyennes,color=Pente))+geom_boxplot()+ggtitle('Influence de la pente sur le recouvrement global Herbace')+ylab('Moyennes recouvrement herbacé pour chaque placette')
+
+ggplot(TableRecouvrementHerbace,aes(x=Vallon,y=Moyennes,color=Vallon))+geom_boxplot()+ggtitle('Influence du Vallon sur le recouvrement global Herbacé')+ylab('Moyennes recouvrement herbacé pour chaque placette')
+
+```
+
+#### Boxplot du recouvrement global arbustif selon les caractéristiques considérées
+```{r représentation Recouvrement Arbustif}
+ggplot(TableRecouvrementArbustif,aes(x=Pente,y=Moyennes,color=Pente))+geom_boxplot()+ggtitle('Influence de la pente sur le recouvrement global Arbustif')+ylab('Moyennes recouvrement arbustif pour chaque placette')
+
+ggplot(TableRecouvrementArbustif,aes(x=Exposition,y=Moyennes, color=Exposition))+geom_boxplot()+ggtitle('Influence de l exposition Nord-Sud sur le recouvrement global Arbustif')+ylab('Moyennes recouvrement arbustif pour chaque placette')
+
+ggplot(TableRecouvrementArbustif,aes(x=Vallon,y=Moyennes,color=Vallon))+geom_boxplot()+ggtitle('Influence du Vallon sur le recouvrement global Arbustif')+ylab('Moyennes recouvrement arbustif pour chaque placette')
+
+```
+
+####   Boxplot du recouvrement global arboré selon les caractéristiques considérées
+```{r représentation Recouvrement Arboré}
+ggplot(TableRecouvrementArbore,aes(x=Exposition,y=Moyennes,color=Exposition))+geom_boxplot()+ggtitle('Influence de l exposition Nord-Sud sur le recouvrement global Arboré')+ylab('Moyennes recouvrement arboré pour chaque placette')
+
+ggplot(TableRecouvrementArbore,aes(x=Pente,y=Moyennes,color=Pente))+geom_boxplot()+ggtitle('Influence de la pente sur le recouvrement global Arbore')+ylab('Moyennes recouvrement arboré pour chaque placette')
+
+
+ggplot(TableRecouvrementArbore,aes(x=Vallon,y=Moyennes,color=Vallon))+geom_boxplot()+ggtitle('Influence du vallon sur le recouvrement global Arbore')+ylab('Moyennes recouvrement arboré pour chaque placette')
+
+```
+###    Réalisation de test Anova
+####   Test Anova sur les caractéristiques pouvant expliqué les différences de recouvrement herbacé observé
+
+Afin de pouvoir tirer des conclusion des boxplots, il faut savoir si les résultats sont significatifs. Pour cela, on réalise des tests anova. 
+
+```{r test anova sur le recouvrement Herbace}
+test1.1<-lm(Moyennes~Exposition ,data=TableRecouvrementHerbace)
+test2.1<-lm(Moyennes~Pente ,data=TableRecouvrementHerbace)
+pairs(lsmeans(test2.1,~Pente))
+test3.1<-lm(Moyennes~Vallon,data=TableRecouvrementHerbace)
+
+test4.1<-lm(Moyennes~Exposition*Pente,data=TableRecouvrementHerbace)
+pairs(lsmeans(test4.1,~Exposition*Pente))
+test5.1<-lm(Moyennes~Exposition*Vallon,data=TableRecouvrementHerbace)
+pairs(lsmeans(test5.1,~Exposition*Vallon))
+test6.1<-lm(Moyennes~Pente*Vallon,data=TableRecouvrementHerbace)
+test7.1<-lm(Moyennes~Pente*Vallon*Exposition,data=TableRecouvrementHerbace)
+
+
+
+```
+
+####   Test Anova sur les caractéristiques pouvant expliqué les différences de recouvrement arbustif observé
+
+```{r test anova sur le recouvrement Arbustif}
+test1.2<-lm(Moyennes~Exposition,data=TableRecouvrementArbustif)
+pairs(lsmeans(test1.2,~Exposition))
+test2.2<-lm(Moyennes~Pente,data=TableRecouvrementArbustif)
+test3.2<-lm(Moyennes~Vallon,data=TableRecouvrementArbustif)
+
+test4.2<-lm(Moyennes~Exposition*Pente,data=TableRecouvrementArbustif)
+test5.2<-lm(Moyennes~Exposition*Vallon,data=TableRecouvrementArbustif)
+test6.2<-lm(Moyennes~Pente*Vallon,data=TableRecouvrementArbustif)
+test7.2<-lm(Moyennes~Pente*Vallon*Exposition,data=TableRecouvrementArbustif)
+
+
+
+```
+
+####   Test Anova sur les caractéristiques pouvant expliqué les différences de recouvrement arboré observé
+```{r test anova sur le recouvrement Arboré}
+test1.3<-lm(Moyennes~Exposition,data=TableRecouvrementArbore)
+test2.3<-lm(Moyennes~Pente,data=TableRecouvrementArbore)
+test3.3<-lm(Moyennes~Vallon,data=TableRecouvrementArbore)
+
+test4.3<-lm(Moyennes~Exposition*Pente,data=TableRecouvrementArbore)
+test5.3<-lm(Moyennes~Exposition*Vallon,data=TableRecouvrementArbore)
+pairs(lsmeans(test5.3,~Exposition*Vallon))
+test6.3<-lm(Moyennes~Pente*Vallon,data=TableRecouvrementArbore)
+test7.3<-lm(Moyennes~Pente*Vallon*Exposition,data=TableRecouvrementArbore)
+
+
+```
+
+###    Représentation des tests Anova 
+####   Test Anova pour le recouvrement herbacé
+```{r représentation test anova sur le recouvrement herbace}
+
+
+sjPlot::tab_model(test1.1,show.intercept = T)
+plot_model(test1.1, show.values = TRUE, width = 0.1,title = "Effet de l'exposition sur le recouvrement global herbacé") +  ylab("moyenne recouvrement as compared to N") 
+
+sjPlot::tab_model(test2.1,show.intercept = T)
+plot_model(test2.1, show.values = TRUE, width = 0.1,title = "Effet de la pente sur le recouvrement global herbacé") +  ylab("moyenne recouvrement as compared to BDP")
+
+sjPlot::tab_model(test3.1,show.intercept = T)
+plot_model(test3.1, show.values = TRUE, width = 0.1, title = "Effet du Vallon sur le recouvrement global herbacé") +  ylab("moyenne recouvrement as compared to BoisdeLacure")
+
+sjPlot::tab_model(test4.1,show.intercept = T)
+plot_model(test7.2, show.values = TRUE, width = 0.1, title = "Effet de l'exposition, de la pente et du vallon sur le recouvrement global arbustif") +  ylab("moyenne recouvrement as compared to N,BDP and BoisdeLacure") 
+
+plot_model(test4.1, show.values = TRUE, width = 0.1, title = "Effet de l'exposition et de la pente sur le recouvrement global herbacé") +  ylab("moyenne recouvrement as compared to N and BDP") 
+
+sjPlot::tab_model(test5.1,show.intercept = T)
+plot_model(test5.1, show.values = TRUE, width = 0.1, title = "Effet de l'exposition et du Vallon sur le recouvrement global herbacé") +  ylab("moyenne recouvrement as compared to N and BoisdeLacure")
+
+sjPlot::tab_model(test6.1,show.intercept = T)
+plot_model(test6.1, show.values = TRUE, width = 0.1, title = "Effet du Vallon et de la pente sur le recouvrement global herbacé") +  ylab("moyenne recouvrement as compared to BoisdeLacure and BDP")
+
+sjPlot::tab_model(test7.1,show.intercept = T)
+plot_model(test7.1, show.values = TRUE, width = 0.1, title = "Effet de l'exposition, de la pente et du vallon sur le recouvrement global herbacé") +  ylab("moyenne recouvrement as compared to N,BDP and BoisdeLacure") 
+
+
+```
+
+Le résultat de ces tests est le suivant: 
+Les placettes en haut de pente et en milieu de pente ont un recouvrement herbacé significativement moins important que celles de bas de pente. Cependant, il n'y a pas de différence significative entre les placettes de haut et de milieu de pente selon le test de contrast. 
+
+De plus, il semble que les placettes au Nord en milieu de pente ont un recouvrement hervacé significativement moins importants que les placettes au Nord et au Sud en bas de pente. 
+
+Enfin, les placettes situées au Nord du bois de Montrond ont un recouvrmeent herbacé significativement moins important que les placettes au Nord du bois de Lacure. 
+
+####   Test Anova pour le recouvrement arbustif
+```{r représentation test anova sur le recouvrement arbustif}
+library(sjPlot)
+library(gridExtra)
+
+
+sjPlot::tab_model(test1.2,show.intercept = T)
+plot_model(test1.2, show.values = TRUE, width = 0.2,title = "Effet de l'exposition sur le recouvrement global arbustif") +  ylab("moyenne recouvrement as compared to N") 
+
+sjPlot::tab_model(test2.2,show.intercept = T)
+plot_model(test2.2, show.values = TRUE, width = 0.1,title = "Effet de la pente sur le recouvrement global arbustif") +  ylab("moyenne recouvrement as compared to BDP")
+
+sjPlot::tab_model(test3.2,show.intercept = T)
+plot_model(test3.2, show.values = TRUE, width = 0.1, title = "Effet du Vallon sur le recouvrement global arbustif") +  ylab("moyenne recouvrement as compared to BoisdeLacure")
+
+sjPlot::tab_model(test4.2,show.intercept = T)
+plot_model(test4.2, show.values = TRUE, width = 0.1, title = "Effet de l'exposition et de la pente sur le recouvrement global arbustif") +  ylab("moyenne recouvrement as compared to N and BDP") 
+
+sjPlot::tab_model(test5.2,show.intercept = T)
+plot_model(test5.2, show.values = TRUE, width = 0.1, title = "Effet de l'exposition et du Vallon sur le recouvrement global arbustif") +  ylab("moyenne recouvrement as compared to N and BoisdeLacure")
+
+sjPlot::tab_model(test6.2,show.intercept = T)
+plot_model(test6.2, show.values = TRUE, width = 0.1, title = "Effet du Vallon et de la pente sur le recouvrement global arbustif") +  ylab("moyenne recouvrement as compared to BoisdeLacure and BDP")
+
+sjPlot::tab_model(test7.2,show.intercept = T)
+plot_model(test7.2, show.values = TRUE, width = 0.1, title = "Effet de l'exposition, de la pente et du vallon sur le recouvrement global arbustif") +  ylab("moyenne recouvrement as compared to N,BDP and BoisdeLacure") 
+
+
+```
+
+Le test de contrast nous montre que les placettes du Sud ont un recouvrement arbustif plus important que celles du Nord. 
+
+####   Test Anova pour le recouvrement arboré
+```{r représentation test anova sur le recouvrement arbore}
+library(sjPlot)
+library(gridExtra)
+
+
+sjPlot::tab_model(test1.3,show.intercept = T)
+plot_model(test1.3, show.values = TRUE, width = 0.2,title = "Effet de l'exposition sur le recouvrement global arboré") +  ylab("moyenne recouvrement as compared to N") 
+
+sjPlot::tab_model(test2.3,show.intercept = T)
+plot_model(test2.3, show.values = TRUE, width = 0.1,title = "Effet de la pente sur le recouvrement global arboré") +  ylab("moyenne recouvrement as compared to BDP")
+
+sjPlot::tab_model(test3.3,show.intercept = T)
+plot_model(test3.3, show.values = TRUE, width = 0.1, title = "Effet du Vallon sur le recouvrement global arboré") +  ylab("moyenne recouvrement as compared to BoisdeLacure")
+
+sjPlot::tab_model(test4.3,show.intercept = T)
+plot_model(test4.3, show.values = TRUE, width = 0.1, title = "Effet de l'exposition et de la pente sur le recouvrement global arboré") +  ylab("moyenne recouvrement as compared to N and BDP") 
+
+sjPlot::tab_model(test5.3,show.intercept = T)
+plot_model(test5.3, show.values = TRUE, width = 0.1, title = "Effet de l'exposition et du Vallon sur le recouvrement global arboré") +  ylab("moyenne recouvrement as compared to N and BoisdeLacure")
+
+sjPlot::tab_model(test6.3,show.intercept = T)
+plot_model(test6.3, show.values = TRUE, width = 0.1, title = "Effet du Vallon et de la pente sur le recouvrement global arboré") +  ylab("moyenne recouvrement as compared to BoisdeLacure and BDP")
+
+sjPlot::tab_model(test7.3,show.intercept = T)
+plot_model(test7.3, show.values = TRUE, width = 0.1, title = "Effet de l'exposition, de la pente et du vallon sur le recouvrement global arboré") +  ylab("moyenne recouvrement as compared to N,BDP and BoisdeLacure") 
+
+
+```
+      
+Au vu des résultats du test, on peut conclure que:
+Le recouvrement arboré des placettes du Nord et du Sud du bois de Lacure est plus important que celui des placettes du Nord du bois de Montrond. De plus, il y'a également une différence au sein des placettes du bois de Montrond, celles au Sud ont un recouvrement significativement plus important que celles au Nord.
+
+
+
+# Étude des Classes de recouvrement de chaques espèces en fonction des différentes strates
+
+
+
+---
+title: "Analyse"
+output:
+  html_document: default
+  pdf_document: default
+date: "2023-05-02"
+bibliography: references.bib
+---
+
+
+```{r}
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(FactoMineR)
+library(factoextra)
+library(ade4)
+```
+
+## Création des tableaux
+
+**Mise en forme des différents vecteurs de caractéristiques**
+
+```{r}
+t_carac <- transpose(Table_caractéristiques_placettes) #transposition
+
+#les noms sont remis 
+rownames(t_carac) <- colnames(Table_caractéristiques_placettes) 
+colnames(t_carac) <- t_carac[1,] 
+
+
+t_carac= t_carac[-1,]
+pente=as.numeric(t_carac$Pente)
+altitude=as.numeric(t_carac$Altitude)
+angle=as.numeric(t_carac$`Angle d'exposition`)
+especes=as.numeric(t_carac$`Nombre espèces`)
+exposition=t_carac$`Nord/Sud`
+emplacement=t_carac$Emplacement
+```
+
+**Mise en forme du gros tableau** : obtention de 3 tableaux séparant arbres, arbustes et herbacées, et d'un tableau global regroupant les 3 (mais en enlevant les colonnes présence)
+
+```{r}
+table_herbacées=select(Table_Recouvrement_Spécifique_Quadrats,starts_with("H"))
+table_arbustes=select(Table_Recouvrement_Spécifique_Quadrats,starts_with("B"))
+table_arbres=select(Table_Recouvrement_Spécifique_Quadrats,starts_with("A"))
+
+t_herbacées=transpose(table_herbacées)
+t_arbustes=transpose(table_arbustes)
+t_arbres=transpose(table_arbres)
+
+rownames(t_herbacées)=colnames(table_herbacées[-1,])
+rownames(t_arbustes)=colnames(table_arbustes[-1,])
+rownames(t_arbres)=colnames(table_arbres[-1,])
+
+colnames(t_herbacées)=Table_Recouvrement_Spécifique_Quadrats$Espèce
+colnames(t_arbustes)=Table_Recouvrement_Spécifique_Quadrats$Espèce
+colnames(t_arbres)=Table_Recouvrement_Spécifique_Quadrats$Espèce
+
+t_globale=rbind(t_arbres,t_arbustes,t_herbacées)
+
+indicB=lapply(t_arbustes,sum)
+indicA=lapply(t_arbres,sum)
+t_arbres=t_arbres[,indicA!=0]
+t_arbustes=t_arbustes[,indicB!=0]
+
+names(t_herbacées)[23]<-"spp_indet.1"
+names(t_herbacées)[92]<-"spp_indet.2"
+names(t_globale)[23]<-"spp_indet.1"
+names(t_globale)[92]<-"spp_indet.2"
+
+#t_arbres=t_arbres[21:150,]
+#t_arbustes=t_arbustes[21:150,]
+#t_herbacées=t_herbacées[21:150,]
+```
+
+
+## Boxplots de la diversité en fonction de quelques caractéristiques
+```{r}
+ggplot(t_carac, aes(x = emplacement, y = especes)) + 
+  geom_boxplot() + 
+  geom_dotplot(aes(fill=ifelse(exposition=="N","exposition Nord", "exposition Sud")), binaxis='y', stackdir='center', dotsize=1) +
+  guides(fill = guide_legend(title=NULL))
+ggplot(t_carac, aes(x = exposition, y = especes)) + geom_boxplot() + geom_dotplot(aes(fill=ifelse(pente<30 ,"pente inférieure à 30", "pente supérieure à 30")),binaxis='y', stackdir='center', dotsize=1) + guides(fill = guide_legend(title=NULL))
+```
+
+On peut voir que l'exposition Sud semble augmenter la diversité spécifique, pour tous les emplacements. Les emplacements et la pente semble ne pas avoir d'influence très significative sur la médiane, mais la dispersion est différente selon l'emplacement.
+
+## ACP
+On cherche à visualiser la dispersion des données, afin de déterminer les espèces qui semblent être les plus caractéristique de chaque milieu, et de déterminer les facteurs (topographie, exposition) qui entraine la plus grande variabilité d'une placette à l'autre.
+**Création des données d'ACP**
+
+```{r}
+
+acpH<-dudi.pca(t_herbacées,scannf=FALSE,nf=5) #herbacées
+
+acpA<-dudi.pca(t_arbres,scannf = FALSE,nf=4) #arbres
+
+acpB<-dudi.pca(t_arbustes,scannf=FALSE,nf=4) #arbustes
+```
+
+**Transformation des listes de caractéristiques en facteurs** (avec multiplication par 5 pour correspondre au nombre de quadras)
+
+```{r}
+facexpo=as.factor(rep(exposition,each=5))
+
+facemplacement=as.factor(rep(emplacement,each=5))
+
+facespeces=c()
+facespeces[especes<25]="-"
+facespeces[especes>=25 & especes<=32]="0"
+facespeces[especes>32]="+"
+facespeces=as.factor(rep(facespeces,each=5))
+
+facaltitude=c()
+facaltitude[altitude<230]="bas"
+facaltitude[altitude>=230 & altitude<=250]="mil"
+facaltitude[altitude>250]="haut"
+facaltitude=as.factor(rep(facaltitude,each=5))
+
+```
+
+**Représentation graphique des ACP selon les différents facteurs**
+
+```{r}
+par(mfrow = c(2,2)) 
+
+gcol <- c("red", "blue","green")
+gcol2 <- c("red", "blue")
+gcol3<- c("red","blue","green","yellow","brown","purple")
+
+#pour les herbacées
+s.class(dfxy = acpH$li, fac = facexpo, col = gcol2, xax = 1, yax = 2)
+title("herbacées en fonction exposition")
+s.class(dfxy = acpH$li, fac = facespeces, col = gcol, xax = 1, yax = 2)
+title("herbacées en fonction diversité")
+s.class(dfxy = acpH$li, fac = facemplacement, col = gcol, xax = 1, yax = 2)
+title("herbacées en fonction emplacement")
+s.class(dfxy = acpH$li, fac = facaltitude, col = gcol, xax = 1, yax = 2)
+title("herbacées en fonction altitude")
+
+#exposition et emplacement, arbres et arbustes
+s.class(dfxy = acpA$li, fac = facexpo, col = gcol2, xax = 1, yax = 2)
+title("arbres en fonction exposition")
+s.class(dfxy = acpB$li, fac = facexpo, col = gcol2, xax = 1, yax = 2)
+title("arbustes en fonction exposition")
+s.class(dfxy = acpA$li, fac = facemplacement, col = gcol, xax = 1, yax = 2)
+title("arbres en fonction emplacement")
+s.class(dfxy = acpB$li, fac = facemplacement, col = gcol, xax = 1, yax = 2)
+title("arbustes en fonction emplacement")
+
+
+facexp_emplacement=as.factor(paste(facexpo,facemplacement))
+s.class(dfxy = acpH$li, fac = facexp_emplacement, col = gcol3, xax = 1, yax = 2)
+title("herbacées: exposition-topographie")
+
+
+facexp_emplacement=as.factor(paste(facexpo,facemplacement))
+s.class(dfxy = acpA$li, fac = facexp_emplacement, col = gcol3, xax = 1, yax = 2)
+title("arbres: exposition-topographie")
+
+
+facexp_emplacement=as.factor(paste(facexpo,facemplacement))
+s.class(dfxy = acpB$li, fac = facexp_emplacement, col = gcol3, xax = 1, yax = 2)
+title("arbustes:exposition-topographie")
+
+```
+
+Au vu des graphiques pour les herbacées, l'altitude et l'emplacement semblent redondants, de même que la diversité et l'exposition Nord/Sud (on a déjà vu qu'il y avait plus de diversité au Sud qu'au Nord).
+
+On constate que le bas de pente se détache bien pour les herbacées et les arbres, ainsi que la différence Nord/Sud chez les herbacées.
+
+**Visualisation en lien avec les espèces** : on cherche à déterminer si des espèces sont spécifiques de certaines topographie, de certaines exposition...
+
+Herbacées
+
+```{r}
+par(mfrow=c(1,1))
+fviz_pca_var(acpH, col.var = "cos2",
+             gradient.cols = c("white", "red", "black"),
+             repel = TRUE)
+s.class(dfxy = acpH$li, fac = facexpo, col = gcol2, xax = 1, yax = 2)
+title("herbacées en fonction exposition")
+s.class(dfxy = acpH$li, fac = facemplacement, col = gcol, xax = 1, yax = 2)
+title("herbacées en fonction emplacement")
+```
+
+Certaines espèces (glécome par exemple), semblent discriminer plutôt le bas de pente, d'autres (lampsane, quercus pubescencs) plutôt le Sud, d'autres enfin plutôt le Nord (Teucrium, Deschampsia)
+
+Arbustes:
+```{r}
+par(mfrow=c(2,2))
+fviz_pca_var(acpB, col.var = "cos2",
+             gradient.cols = c("white", "red", "black"),
+             repel = TRUE)
+s.class(dfxy = acpB$li, fac = facemplacement, col = gcol, xax = 1, yax = 2)
+title("arbustes en fonction emplacement")
+s.class(dfxy = acpB$li, fac = facexpo, col = gcol, xax = 1, yax = 2)
+title("arbustes en fonction exposition")
+```
+
+
+Arbres
+
+```{r}
+par(mfrow=c(2,2))
+fviz_pca_var(acpA, col.var = "cos2",
+             gradient.cols = c("white", "red", "black"),
+             repel = TRUE)
+s.class(dfxy = acpA$li, fac = facemplacement, col = gcol, xax = 1, yax = 2)
+title("arbres en fonction emplacement")
+s.class(dfxy = acpA$li, fac = facexpo, col = gcol, xax = 1, yax = 2)
+title("arbres en fonction exposition")
+```
+
+Quercus robur et Acer campestre semblent tirer plus vers le bas de pente, Quercus pubescens vers le haut/milieu de pente
+
+Les résultats avec les arbustes sont moins lisibles
+
+**ACP sur 3 espèces d'arbre** : ACP sur 3 espèces très présentes dans nos parcelles et qui semblent représentatives
+
+```{r}
+t_A_bis=data.frame()
+t_A_bis=rbind(t_arbres$`Acer campestre`,t_arbres$`Quercus petraea`,t_arbres$`Quercus pubescens`,t_arbres$`Carpinus betulus`)
+t_A_bis=as.data.frame(t_A_bis)
+t_A_bis=transpose(t_A_bis)
+rownames(t_A_bis)=rownames(t_arbres)
+colnames(t_A_bis)=list("Acer_Campestre","Quercus_petraea","Quercus_pubescens","Carpinus_betulus")
+acpA_bis<-dudi.pca(t_A_bis,scannf = FALSE,nf=3)
+par(mfrow=c(2,2))
+s.corcircle(acpA_bis$co,xax=1,yax=2)
+c            
+s.class(dfxy = acpA_bis$li, fac = facexpo, col = gcol2, xax = 1, yax = 2)
+s.class(dfxy = acpA_bis$li, fac = facemplacement, col = gcol, xax = 1, yax = 2)
+s.class(dfxy = acpA_bis$li, fac = facexp_emplacement, col = gcol3, xax = 1, yax = 2)
+```
+Ces arbres permettent de regrouper 3 milieux : le bas de pente (sud et nord indiscriminés), le sud haut/milieu de pente et le nord haut/milieu de pente
+
+
+## Discriminante
+
+**Discriminante par strates**
+
+```{r}
+par(mfrow=c(1,1))
+
+disAexp=discrimin(acpA,fac=facexpo,scannf=FALSE,nf=13)
+plot(disAexp)
+
+disAemp=discrimin(acpA,fac=facemplacement,scannf=FALSE,nf=13)
+plot(disAemp)
+title('arboré')
+disBemp=discrimin(acpB,fac=facemplacement,scannf=FALSE,nf=4)
+plot(disBemp)
+title('arbustes')
+disHemp=discrimin(acpH,fac=facemplacement,scannf=FALSE,nf=123)
+plot(disHemp)
+title('herbacées')
+disAbi=discrimin(acpA,fac=facexp_emplacement,scannf=FALSE,nf=13)
+plot(disAbi)
+title('arboré')
+disBbi=discrimin(acpB,fac=facexp_emplacement,scannf=FALSE,nf=4)
+plot(disBbi)
+title('arbustes')
+disHbi=discrimin(acpH,fac=facexp_emplacement,scannf=FALSE,nf=123)
+plot(disHbi)
+title('herbacées')
+
+```
+
+Bonne discrimination du bas de pente avec les arbres. Très bonne discrimination Haut/Milieu/Bas avec les herbacées. Mauvaise discrimination avec les arbustes. Représentation de l'effet de l'exposition sur les arbres difficilement lisible.
+
+
+
+
+**Utilisation de l'outil bca**
+
+Emplacement
+
+```{r}
+bcaH=bca(acpH,facemplacement,scannf=FALSE,nf=5)
+bcaB=bca(acpB,facemplacement,scannf=FALSE,nf=4)
+bcaA=bca(acpA,facemplacement,scannf=FALSE,nf=4)
+print("Pourcentage de la variabilité expliquée par l'emplacement")
+print("herbacées :")
+print(bcaH$ratio)
+print("arbustes :")
+print(bcaB$ratio)
+print("arbres :")
+print(bcaA$ratio)
+
+```
+
+Exposition
+
+```{r}
+bcaH=bca(acpH,facexpo,scannf=FALSE,nf=5)
+bcaB=bca(acpB,facexpo,scannf=FALSE,nf=4)
+bcaA=bca(acpA,facexpo,scannf=FALSE,nf=4)
+
+print("Pourcentage de la variabilité expliquée par l'exposition")
+print("herbacées :")
+print(bcaH$ratio)
+print("arbustes :")
+print(bcaB$ratio)
+print("arbres :")
+print(bcaA$ratio)
+
+```
+**Analyse de la significativité statistique**
+
+Herbacées
+
+```{r}
+
+
+scol=apply(t_herbacées,2,sum)
+slin=apply(t_herbacées,1,sum)
+
+dis3<-discrimin.coa(t_herbacées[slin>0,scol>0], facemplacement[slin>0], scan = FALSE)
+
+
+fshuffle=function()
+{
+  facshuf <-sample(facemplacement[slin>0])
+  dshuf<-discrimin.coa(t_herbacées[slin>0,scol>0], facshuf, scan = FALSE)
+  ratio <- sum(dshuf$eig)/sum(acpH$eig)
+  return(ratio)
+}
+vratio <- sapply(1:1000,function(x){fshuffle()})
+hist(vratio, xlim=c(0.011,0.019))
+truevalue=sum(dis3$eig)/sum(acpH$eig)
+abline(v=truevalue)
+```
+
+Arbustes
+
+```{r}
+
+
+slin=apply(t_arbustes,1,sum)
+
+dis3<-discrimin.coa(t_arbustes[slin>0,], facemplacement[slin>0], scan = FALSE)
+
+
+fshuffle=function()
+{
+  facshuf <-sample(facemplacement[slin>0])
+  dshuf<-discrimin.coa(t_arbustes[slin>0,], facshuf, scan = FALSE)
+  ratio <- sum(dshuf$eig)/sum(acpB$eig)
+  return(ratio)
+}
+vratio <- sapply(1:1000,function(x){fshuffle()})
+hist(vratio,xlim=c(0.013,0.029))
+truevalue=sum(dis3$eig)/sum(acpB$eig)
+abline(v=truevalue)
+```
+
+Arbres
+
+```{r}
+slin=apply(t_arbres,1,sum)
+
+dis3<-discrimin.coa(t_arbres[slin>0,], facemplacement[slin>0], scan = FALSE)
+
+
+fshuffle=function()
+{
+  facshuf <-sample(facemplacement[slin>0])
+  dshuf<-discrimin.coa(t_arbres[slin>0,], facshuf, scan = FALSE)
+  ratio <- sum(dshuf$eig)/sum(acpA$eig)
+  return(ratio)
+}
+vratio <- sapply(1:1000,function(x){fshuffle()})
+hist(vratio, xlim=c(0.009,0.066))
+truevalue=sum(dis3$eig)/sum(acpA$eig)
+abline(v=truevalue)
+```
+Pour l'ensemble des strates, les valeurs de bca sont robustes, et sont donc significative. Les part de variabilité expliqué ne sont pas du au hasard.
+
+
+# Etude de la diversité à l'échelle des quadrats
+
+```{r "création de la data frame pour les boxplots"}
+ndataherbe<-c()
+for (k in (3:182)){
+  s<-0
+  for (j in (3:124)){
+    if((Herbe[j,k]!= 0) && (Herbe[j,k]!= 'F')){
+        s<-s+1
+    }
+  }
+  ndataherbe<-c(ndataherbe,s)
+}
+
+
+nndataherbe<-c()
+for (k in (1:length(ndataherbe))){
+  if (k%%6 != 0){
+    nndataherbe<-c(nndataherbe,ndataherbe[k])
+    }
+}
+
+
+ndataarbuste<-c()
+for (k in (3:182)){
+  s<-0
+  for (j in (3:124)){
+    if((Buisson[j,k]!= 0) && (Buisson[j,k]!= 'F')){
+        s<-s+1
+    }
+  }
+  ndataarbuste<-c(ndataarbuste,s)
+}
+
+
+nndataarbuste<-c()
+for (k in (1:length(ndataarbuste))){
+  if (k%%6 != 0){
+    nndataarbuste<-c(nndataarbuste,ndataarbuste[k])
+    }
+}
+
+
+
+
+ndataarbre<-c()
+for (k in (3:182)){
+  s<-0
+  for (j in (3:124)){
+    if((Arbre[j,k]!= 0) && (Arbre[j,k]!= 'F')){
+        s<-s+1
+    }
+  }
+  ndataarbre<-c(ndataarbre,s)
+}
+
+
+nndataarbre<-c()
+for (k in (1:length(ndataarbre))){
+  if (k%%6 != 0){
+    nndataarbre<-c(nndataarbre,ndataarbre[k])
+    }
+}
+
+
+placet<-c()
+topo<-c()
+expo<-c()
+Vallon<-c()
+
+for (k in 1:5){
+  placet<-c(placet,'P1.1')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P1.2')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P2.1')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P2.2')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P3.1')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P3.2')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P4.1')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P4.2')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P5.1')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P5.2')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P6.1')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P6.2')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P7.1')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_la_cure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P7.2')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_la_cure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P8.1')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_la_cure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P8.2')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_la_cure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P9.1')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_la_cure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P9.2')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_la_cure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P10.1')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_la_cure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P10.2')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_la_cure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P11.1')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_la_cure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P11.2')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_la_cure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P12.1')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_la_cure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P12.2')
+  topo<-c(topo,'HDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_la_cure')
+}
+for (k in 1:5){
+  placet<-c(placet,'P14.1')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P14.2')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'N')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P16.1')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P16.2')
+  topo<-c(topo,'BDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P17.1')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+for (k in 1:5){
+  placet<-c(placet,'P17.2')
+  topo<-c(topo,'MDP')
+  expo<-c(expo,'S')
+  Vallon<-c(Vallon, 'Bois_de_montrond')
+}
+
+df1<-data.frame(
+  diversité_herbacée = nndataherbe,
+  diversité_arbustive = nndataarbuste,
+  diversité_arborée = nndataarbre,
+  placette = placet,
+  topographie = topo,
+  exposition = expo,
+  Lieu = Vallon
+)
+```
+
+```{r boxplots généraux,include=FALSE}
+
+library('tidyverse')
+
+ph <- ggplot(df1, aes(x=placette, y=diversité_herbacée, color=topographie, alpha=exposition)) + geom_boxplot(outlier.color = 'red', outlier.shape = 8, outlier.size=2) + ggtitle('Diversité spécifique Herbacée de chaque placette') + xlab('Placettes') + ylab('Diversité spécifique')
+
+pb <- ggplot(df1, aes(x=placette, y=diversité_arbustive, color=topographie, alpha=exposition)) + 
+  geom_boxplot(outlier.color = 'red', outlier.shape = 8, outlier.size=2) + ggtitle('Diversité spécifique Arbustive de chaque placette') + xlab('Placettes') + ylab('Diversité spécifique')
+
+pa <- ggplot(df1, aes(x=placette, y=diversité_arborée, color=topographie, alpha=exposition)) + 
+  geom_boxplot(outlier.color = 'red', outlier.shape = 8, outlier.size=2) + ggtitle('Diversité spécifique Arborée de chaque placette') + xlab('Placettes') + ylab('Diversité spécifique')
+```
+
+```{r figures générales, include=FALSE}
+
+pfh<- ph + theme(
+plot.title = element_text(color="black", size=18, face="bold"),
+axis.title.x = element_text(color="blue", size=14, face="italic"),
+axis.title.y = element_text(color="blue", size=14, face="italic"),
+axis.text.x = element_text(angle = 65, hjust = 0.5, vjust = 0.5)
+)
+
+pfb<- pb + theme(
+plot.title = element_text(color="black", size=18, face="bold"),
+axis.title.x = element_text(color="blue", size=14, face="italic"),
+axis.title.y = element_text(color="blue", size=14, face="italic"),
+axis.text.x = element_text(angle = 65, hjust = 0.5, vjust = 0.5)
+)
+
+pfa<- pa + theme(
+plot.title = element_text(color="black", size=18, face="bold"),
+axis.title.x = element_text(color="blue", size=14, face="italic"),
+axis.title.y = element_text(color="blue", size=14, face="italic"),
+axis.text.x = element_text(angle = 65, hjust = 0.5, vjust = 0.5)
+)
+```
+
+```{r}
+pfh
+pfb
+pfa
+```
+
+```{r boxplot Topographie, include=FALSE}
+p1h <- ggplot(df1, aes(x=topographie, y=diversité_herbacée, color=topographie)) + 
+  geom_boxplot(outlier.color = 'red', outlier.shape = 8, outlier.size=2) + ggtitle('Diversité spécifique herbacée en fonction de la topographie des placettes') + xlab('Topographie') + ylab('Diversité spécifique')
+p1b <- ggplot(df1, aes(x=topographie, y=diversité_arbustive, color=topographie)) + 
+  geom_boxplot(outlier.color = 'red', outlier.shape = 8, outlier.size=2) + ggtitle('Diversité spécifique arbustive en fonction de la topographie des placettes') + xlab('Topographie') + ylab('Diversité spécifique')
+p1a <- ggplot(df1, aes(x=topographie, y=diversité_arborée, color=topographie)) + 
+  geom_boxplot(outlier.color = 'red', outlier.shape = 8, outlier.size=2) + ggtitle('Diversité spécifique arborée en fonction de la topographie des placettes') + xlab('Topographie') + ylab('Diversité spécifique')
+```
+```{r figure topographie, include=FALSE}
+p1fh <- p1h + theme(
+plot.title = element_text(color="black", size=16, face="bold"),
+axis.title.x = element_text(color="blue", size=14, face="italic"),
+axis.title.y = element_text(color="blue", size=14, face="italic"),
+axis.text.x = element_text(angle = 65, hjust = 0.5, vjust = 0.5)
+)
+p1fb <- p1b + theme(
+plot.title = element_text(color="black", size=16, face="bold"),
+axis.title.x = element_text(color="blue", size=14, face="italic"),
+axis.title.y = element_text(color="blue", size=14, face="italic"),
+axis.text.x = element_text(angle = 65, hjust = 0.5, vjust = 0.5)
+)
+p1fa <- p1a + theme(
+plot.title = element_text(color="black", size=16, face="bold"),
+axis.title.x = element_text(color="blue", size=14, face="italic"),
+axis.title.y = element_text(color="blue", size=14, face="italic"),
+axis.text.x = element_text(angle = 65, hjust = 0.5, vjust = 0.5)
+)
+```
+```{r}
+p1fh
+p1fb
+p1fa
+```
+
+```{r boxplot Exposition, include=FALSE}
+p2h <- ggplot(df1, aes(x=exposition, y=diversité_herbacée, color=exposition)) + 
+  geom_boxplot(outlier.color = 'red', outlier.shape = 8, outlier.size=2) + ggtitle("Diversité spécifique herbacée en fonction de l'exposition des placettes") + xlab('Topographie') + ylab('Diversité spécifique')
+p2b <- ggplot(df1, aes(x=exposition, y=diversité_arbustive, color=exposition)) + 
+  geom_boxplot(outlier.color = 'red', outlier.shape = 8, outlier.size=2) + ggtitle("Diversité spécifique arbustive en fonction de l'exposition des placettes") + xlab('Topographie') + ylab('Diversité spécifique')
+p2a <- ggplot(df1, aes(x=exposition, y=diversité_arborée, color=exposition)) + 
+  geom_boxplot(outlier.color = 'red', outlier.shape = 8, outlier.size=2) + ggtitle("Diversité spécifique arborée en fonction de l'exposition des placettes") + xlab('Topographie') + ylab('Diversité spécifique')
+```
+```{r figure exposition, include=FALSE}
+p2fh<- p2h + theme(
+plot.title = element_text(color="black", size=16, face="bold"),
+axis.title.x = element_text(color="blue", size=14, face="italic"),
+axis.title.y = element_text(color="blue", size=14, face="italic"),
+axis.text.x = element_text(angle = 65, hjust = 0.5, vjust = 0.5)
+)
+p2fb<- p2b + theme(
+plot.title = element_text(color="black", size=16, face="bold"),
+axis.title.x = element_text(color="blue", size=14, face="italic"),
+axis.title.y = element_text(color="blue", size=14, face="italic"),
+axis.text.x = element_text(angle = 65, hjust = 0.5, vjust = 0.5)
+)
+p2fa<- p2a + theme(
+plot.title = element_text(color="black", size=16, face="bold"),
+axis.title.x = element_text(color="blue", size=14, face="italic"),
+axis.title.y = element_text(color="blue", size=14, face="italic"),
+axis.text.x = element_text(angle = 65, hjust = 0.5, vjust = 0.5)
+)
+```
+```{r}
+p2fh
+p2fb
+p2fa
+```
+```{r boxplot Lieu, include=FALSE}
+p3h <- ggplot(df1, aes(x=Lieu, y=diversité_herbacée, color=Lieu)) + 
+  geom_boxplot(outlier.color = 'red', outlier.shape = 8, outlier.size=2) + ggtitle("Diversité spécifique herbacée en fonction du Lieu") + xlab('Lieu') + ylab('Diversité spécifique')
+p3b <- ggplot(df1, aes(x=Lieu, y=diversité_arbustive, color=Lieu)) + 
+  geom_boxplot(outlier.color = 'red', outlier.shape = 8, outlier.size=2) + ggtitle("Diversité spécifique arbustive en fonction du Lieu") + xlab('Lieu') + ylab('Diversité spécifique')
+p3a <- ggplot(df1, aes(x=Lieu, y=diversité_arborée, color=Lieu)) + 
+  geom_boxplot(outlier.color = 'red', outlier.shape = 8, outlier.size=2) + ggtitle("Diversité spécifique arborée en fonction du Lieu") + xlab('Lieu') + ylab('Diversité spécifique')
+```
+```{r figure lieu, include=FALSE}
+p3fh<- p3h + theme(
+plot.title = element_text(color="black", size=16, face="bold"),
+axis.title.x = element_text(color="blue", size=14, face="italic"),
+axis.title.y = element_text(color="blue", size=14, face="italic"),
+axis.text.x = element_text(angle = 65, hjust = 0.5, vjust = 0.5)
+)
+p3fb<- p3b + theme(
+plot.title = element_text(color="black", size=16, face="bold"),
+axis.title.x = element_text(color="blue", size=14, face="italic"),
+axis.title.y = element_text(color="blue", size=14, face="italic"),
+axis.text.x = element_text(angle = 65, hjust = 0.5, vjust = 0.5)
+)
+p3fa<- p3a + theme(
+plot.title = element_text(color="black", size=16, face="bold"),
+axis.title.x = element_text(color="blue", size=14, face="italic"),
+axis.title.y = element_text(color="blue", size=14, face="italic"),
+axis.text.x = element_text(angle = 65, hjust = 0.5, vjust = 0.5)
+)
+```
+```{r}
+p3fh
+p3fb
+p3fa
+```
+
+# Indice de Sorensen
+```{r "Création de la dataframe pourla matrice de Sorensen"}
+placet<-c()
+topo<-c()
+expo<-c()
+Vallon<-c()
+
+placet<-c(placet,'P1.1')
+topo<-c(topo,'HDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P1.2')
+topo<-c(topo,'HDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P2.1')
+topo<-c(topo,'MDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P2.2')
+topo<-c(topo,'MDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P3.1')
+topo<-c(topo,'BDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P3.2')
+topo<-c(topo,'BDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P4.1')
+topo<-c(topo,'BDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P4.2')
+topo<-c(topo,'BDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P5.1')
+topo<-c(topo,'MDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P5.2')
+topo<-c(topo,'MDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P6.1')
+topo<-c(topo,'HDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P6.2')
+topo<-c(topo,'HDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P7.1')
+topo<-c(topo,'HDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_la_cure')
+
+placet<-c(placet,'P7.2')
+topo<-c(topo,'HDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_la_cure')
+
+placet<-c(placet,'P8.1')
+topo<-c(topo,'MDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_la_cure')
+
+placet<-c(placet,'P8.2')
+topo<-c(topo,'MDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_la_cure')
+
+placet<-c(placet,'P9.1')
+topo<-c(topo,'BDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_la_cure')
+
+placet<-c(placet,'P9.2')
+topo<-c(topo,'BDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_la_cure')
+
+placet<-c(placet,'P10.1')
+topo<-c(topo,'BDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_la_cure')
+
+placet<-c(placet,'P10.2')
+topo<-c(topo,'BDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_la_cure')
+
+placet<-c(placet,'P11.1')
+topo<-c(topo,'MDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_la_cure')
+
+placet<-c(placet,'P11.2')
+topo<-c(topo,'MDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_la_cure')
+
+placet<-c(placet,'P12.1')
+topo<-c(topo,'HDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_la_cure')
+
+placet<-c(placet,'P12.2')
+topo<-c(topo,'HDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_la_cure')
+
+placet<-c(placet,'P14.1')
+topo<-c(topo,'MDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P14.2')
+topo<-c(topo,'MDP')
+expo<-c(expo,'N')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P16.1')
+topo<-c(topo,'BDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P16.2')
+topo<-c(topo,'BDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P17.1')
+topo<-c(topo,'MDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+placet<-c(placet,'P17.2')
+topo<-c(topo,'MDP')
+expo<-c(expo,'S')
+Vallon<-c(Vallon, 'Bois_de_montrond')
+
+
+df2<-data.frame(
+  placette = placet,
+  topographie = topo,
+  exposition = expo,
+  Lieu = Vallon
+)
+```
+
+
+```{r}
+nplacettestot=sapply(names(Table_Recouvrement_Spécifique_Placettes),function(x){strsplit(x,"\\.")[[1]][1]})
+nplacettestot_u= unique(nplacettestot)
+
+fplacette = function(num)
+{
+# colonnes pour la placette 1
+cp=grep(num,names(Table_Recouvrement_Spécifique_Placettes))
+cpres=grep("Pr",Table_Recouvrement_Spécifique_Placettes[1,])
+cp1=cp[!cp%in%cpres]
+# datasubset placette 1, enleve la colonne presence
+datap1=Table_Recouvrement_Spécifique_Placettes[-1,cp1]
+# on fait la somme par espece des presences
+sumpres=apply(datap1,1,function(li){sum(as.numeric(li))})
+ispres=sumpres>0
+return(ispres)
+}
+
+Table_de_presence_recap<-sapply(nplacettestot_u[3:length(nplacettestot_u)],function(x){fplacette(x)})
+
+#Fonction qui calcule l'indice de Sorensen de deux placettes à partir de la liste des espèces présentes dans ces placettes.
+
+calc_indice_sorensen<-function(lsp1,lsp2){
+  c<-0
+  sp1<-0
+  sp2<-0
+  for(k in (1:length(lsp1))){
+    if((lsp1[k]==TRUE)&&(lsp2[k]==lsp1[k])){
+      c<-c+1
+    }
+    if (lsp1[k]==TRUE){
+      sp1<- sp1+1
+    }
+    if (lsp2[k]==TRUE){
+      sp2<- sp2+1
+    }
+  }
+  index<- c/((sp1+sp2)/2)
+  return(index)
+}
+
+
+calc_indice_sorensen<-function(lsp1,lsp2){
+  c<-sum(as.numeric(lsp2)&as.numeric(lsp1))
+  sp1<-sum(lsp1)
+  sp2<-sum(lsp2)
+  index<- c/((sp1+sp2)/2)
+  return(index)
+}
+
+
+matricedecomparaison=matrix(data = NA, nrow = 30 , ncol = 30, byrow = FALSE,
+       dimnames = list(nplacettestot_u[3:32],nplacettestot_u[3:32]))
+
+
+sapply(nplacettestot_u[3:32],function(i){
+  sapply(nplacettestot_u[3:32],function(j){
+    #cat("i",i,"\n");
+    #cat("j",j,"\n");
+matricedecomparaison[i,j]<<-calc_indice_sorensen(Table_de_presence_recap[,i],Table_de_presence_recap[,j])})})
+
+library(pheatmap)
+row.names(df2)=gsub("\\.","_",df2[,1])
+mat_col=data.frame(topo=df2[,2])
+row.names(mat_col)=gsub("\\.","_",df2[,1])
+mat_row=data.frame(expo=df2[,3])
+row.names(mat_row)=gsub("\\.","_",df2[,1])
+mat_val=data.frame(lieu=df2[,4])
+row.names(mat_row)=gsub("\\.","_",df2[,1])
+
+
+df3<-data.frame(mat_row,df2$Lieu)
+```
+```{r "Affichage de la matrice de Sorensen"}
+pheatmap(1-matricedecomparaison, annotation_col = mat_col, annotation_row = df3)
+
+```
+
+
+
+
+
+# Étude de la diversité spécifique totale en fonction de la topographie, de l'exposition et des différents vallon: bois de la Cure et bois de Montrond
+
+
+## Diversité spécifique selon les vallons en fonction de la topographie et de l'exposition
+
+### Total
+
+On cherche à visualiser si le placement de la placette à différents niveaux d'une pente (haut, milieu et bas) peut influencer sa richesse spécifique
+
+#### Nombre d'espèces par placette :
+
+Dans un premier temps, on cherche à avoir une liste qui contient le nombre d'espèce par placette. 
+On importe le tableau général :
+
+
+
+
+```{r}
+ispresence <- grep("Presence", names(Table_Recouvrement_Spécifique_Quadrats))
+
+lnb <- sapply(ispresence,function(i){sum(Table_Recouvrement_Spécifique_Quadrats[,i])})
+
+nbsp2 <- c()
+for (i in ispresence){
+  s <- sum(Table_Recouvrement_Spécifique_Quadrats[,i])
+  s
+  nbsp2 <- c(nbsp2,s)
+}
+```
+
+#### Affichage de la diversité spécifique des placettes en fonction de leur topographie et de leur exposition :
+
+
+Il s'agit maintenant de créer un tableau "à la main" regroupant ces résultats avec la topographie de chaque placette (Haut de pente = HDP, Milieu de pent = MDP, Bas de pente = BDP) et leur exposition (Sud = S, Nord = N).
+
+```{r constituotion des listes avec les caractères des placettes}
+topographie <- c('HDP','HDP','MDP','MDP','BDP','BDP','BDP','BDP','MDP','MDP','HDP','HDP','HDP','HDP','MDP','MDP','BDP','BDP','BDP','BDP','MDP','MDP','HDP','HDP','MDP','MDP','BDP','BDP','HDP','HDP')
+numplct <- c('1_1','1_2','2_1','2_2','3_1','3_2','4_1','4_2','5_1','5_2','6_1','6_2','7_1','7_2','8_1','8_2','9_1','9_2','10_1','10_2','11_1','11_2','12_1','12_2','14_1','14_2','16_1','16_2','17_1','17_2')
+expo <- c('N','N','N','N','N','N','S','S','S','S','S','S','N','N','N','N','S','S','N','N','S','S','S','S','N','N','S','S','S','S')
+```
+
+
+```{r tableau avec données totales par placettes, include = FALSE}
+tab <- data.frame(
+  Placette = numplct,
+  Topographie = topographie,
+  Exposition = expo,
+  Nombre_espece =lnb)
+```
+```{r}
+tab
+```
+
+
+Puis on affiche ce tableau en boxplot :
+
+```{r boxplot total des espèces, include = FALSE}
+library('tidyverse')
+fig <- ggplot(tab, aes(x = Topographie, y = Nombre_espece, color = Topographie, alpha = Exposition)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle('Diversité spécifique générale en fonction de la topographie des placettes ') + xlab('Topographie') + ylab("Nombre d'espèces")
+
+figure <- fig + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+```
+```{r}
+figure
+```
+
+##### Représentations des effets de la topographie et de l'exposition sur la diversité spécifique totale :
+
+On cherche à voir s'il y a des différences significatives dans la diversité spécifique selon l'exposition et la topographie des placettes.
+
+```{r, include=FALSE}
+glm1 <- glm(Nombre_espece~Topographie, data=tab, family = "poisson")
+glm2 <- glm(Nombre_espece~Exposition, data=tab, family = "poisson")
+glm3 <- glm(Nombre_espece~Exposition*Topographie, data= tab,family = "poisson")
+```
+
+```{r}
+library(sjPlot)
+library(contrast)
+
+sjPlot::tab_model(glm1,show.intercept = T)
+plot_model(glm1, show.values = TRUE, width = 0.1, title = "Effet de la topographie sur la diversité spécifique totale") +  ylab("Pourcentage d'espèces en plus par rapport au BDP")
+```
+
+La topographie ne semble pas avoir d'influence significative sur la diversité spécifique.
+
+```{r}
+sjPlot::tab_model(glm2,show.intercept = T)
+plot_model(glm2, show.values = TRUE, width = 0.1, title = "Effet de l'exposition sur la diversité spécifique totale") +  ylab("Pourcentage d'espèces en plus par rapport N")
+```
+
+L'exposition est significativement influente sur la diversité spécifique : il y a en moyenne 44% d'espèces de plus en face Sud qu'en face Nord.
+
+```{r}
+sjPlot::tab_model(glm3,show.intercept = T)
+plot_model(glm3, show.values = TRUE, width = 0.1, title = "Effet de la topographie et de l'exposition sur la diversité spécifique totale") +  ylab("Pourcentage d'espèces en plus par rapport à BDP/N")
+```
+
+Lorsqu'on s'intéresse à l'effet combiné de la topographie et de l'exposition, c'est en milieu de pente que l'expostion Sud apporte le plus de diversité spécifique, avec 48% d'espèces en plus pour le MDP/Sud que pour le BDP/Nord.
+
+
+
+
+### Herbacées
+
+On cherche à visualiser si le placement de la placette à différents niveaux d'une pente (haut, milieu et bas) peut influencer sa richesse spécifique herbacée, le tout selon l'exposition
+
+#### Nombre d'espèces par placette :
+
+Dans un premier temps, on cherche à avoir une liste qui contient le nombre d'espèce d'herbacée par placette. 
+
+
+```{r}
+presence_herb<- grep("Presence", names(Herbesp))
+
+nbspH <- c()
+for (i in presence_herb){
+  s <- sum(Herbesp[,i])
+  s
+  nbspH <- c(nbspH,s)
+}
+```
+
+#### Affichage de la diversité spécifique de la strate herbacée dans placettes en fonction de leur topographie et de leur exposition :
+
+Il s'agit maintenant de créer un tableau "à la main" regroupant ces résultats avec la topographie de chaque placette (Haut de pente = HDP, Milieu de pent = MDP, Bas de pente = BDP) et leur exposition (Sud = S, Nord = N).
+
+```{r tableau avec données herbacées par placettes, include = FALSE}
+tabH <- data.frame(
+  Placette = numplct,
+  Topographie = topographie,
+  Exposition = expo,
+  Nombre_espece =nbspH)
+```
+
+```{r}
+tabH
+```
+```{r boxplot des herbacées, include = FALSE}
+library('tidyverse')
+figH <- ggplot(tabH, aes(x = Topographie, y = Nombre_espece, color = Topographie, alpha = Exposition)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle('Diversité spécifique de la strate herbacée en fonction de la topographie des placettes et de leur exposition') + xlab('Topographie') + ylab("Nombre d'espèces")
+
+figureH <- figH + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+```
+```{r}
+figureH
+```
+
+#### Représentations des effets de la topographie et de l'exposition sur la diversité spécifique herbacée :
+
+On cherche à voir s'il y a des différences significatives dans la diversité spécifique de la strate herbacée selon l'exposition et la topographie des placettes.
+
+```{r, include=FALSE}
+glmH1 <- glm(Nombre_espece~Topographie, data=tabH, family = "poisson")
+glmH2 <- glm(Nombre_espece~Exposition, data=tabH, family = "poisson")
+glmH3 <- glm(Nombre_espece~Exposition*Topographie, data= tabH,family = "poisson")
+```
+
+```{r}
+sjPlot::tab_model(glmH1,show.intercept = T)
+plot_model(glmH1, show.values = TRUE, width = 0.1, title = "Effet de la topographie sur la diversité spécifique herbacée") +  ylab("Pourcentage d'espèces en plus par rapport au BDP")
+```
+
+La topographie ne semble pas avoir d'influence significative sur la diversité spécifique au sein de la strate herbacée.
+
+```{r}
+sjPlot::tab_model(glmH2,show.intercept = T)
+plot_model(glmH2, show.values = TRUE, width = 0.1, title = "Effet de l'exposition sur la diversité spécifique herbacée") +  ylab("Pourcentage d'espèces en plus par rapport N")
+```
+
+L'exposition est significativement influente sur la diversité spécifique : il y a en moyenne 43% d'espèces de plus en face Sud qu'en face Nord.
+
+```{r}
+sjPlot::tab_model(glmH3,show.intercept = T)
+plot_model(glmH3, show.values = TRUE, width = 0.1, title = "Effet de la topographie et de l'exposition sur la diversité spécifique herbacée") +  ylab("Pourcentage d'espèces en plus par rapport à BDP/N")
+```
+
+Lorsqu'on s'intéresse à l'effet combiné de la topographie et de l'exposition, c'est en milieu de pente que l'expostion Sud apporte le plus de diversité spécifique en herbacée, avec 68% d'espèces en MDP/Sud qu'en BDP/Nord.
+
+
+
+
+### Arbustes :
+
+On cherche à visualiser si le placement de la placette à différents niveaux d'une pente (haut, milieu et bas) peut influencer la richesse spécifique de sa strate arbustive, le tout selon l'exposition.
+
+#### Nombre d'espèces par placette :
+
+Dans un premier temps, on cherche à avoir une liste qui contient le nombre d'espèces arbustives par placette. 
+
+
+```{r}
+presence_arbuste<- grep("Presence", names(arbustifsp))
+
+nbspB <- c()
+for (i in presence_arbuste){
+  s <- sum(arbustifsp[,i])
+  s
+  nbspB <- c(nbspB,s)
+}
+```
+
+#### Affichage de la diversité spécifique de la strate arbustive dans placettes en fonction de leur topographie et de leur exposition :
+
+Il s'agit maintenant de créer un tableau "à la main" regroupant ces résultats avec la topographie de chaque placette (Haut de pente = HDP, Milieu de pent = MDP, Bas de pente = BDP) et leur exposition (Sud = S, Nord = N).
+
+```{r tableau avec données arbustives par placettes, include = FALSE}
+tabB <- data.frame(
+  Placette = numplct,
+  Topographie = topographie,
+  Exposition = expo,
+  Nombre_espece =nbspB)
+```
+```{r}
+tabB
+```
+
+```{r boxplot arbuste, include = FALSE}
+library('tidyverse')
+figB <- ggplot(tabB, aes(x = Topographie, y = Nombre_espece, color = Topographie, alpha = Exposition)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle('Diversité spécifique de la strate arbustive en fonction de la topographie des placettes et de leur exposition') + xlab('Topographie') + ylab("Nombre d'espèces")
+
+figureB <- figB + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+```
+```{r}
+figureB
+```
+
+#### Représentations des effets de la topographie et de l'exposition sur la diversité spécifique arbustive :
+
+On cherche à voir s'il y a des différences significatives dans la diversité spécifique de la strate arbustive selon l'exposition et la topographie des placettes.
+
+```{r, include=FALSE}
+glmB1 <- glm(Nombre_espece~Topographie, data=tabB, family = "poisson")
+glmB2 <- glm(Nombre_espece~Exposition, data=tabB, family = "poisson")
+glmB3 <- glm(Nombre_espece~Exposition*Topographie, data= tabB,family = "poisson")
+```
+
+```{r}
+sjPlot::tab_model(glmB1,show.intercept = T)
+plot_model(glmB1, show.values = TRUE, width = 0.1, title = "Effet de la topographie sur la diversité spécifique arbustive") +  ylab("Pourcentage d'espèces en plus par rapport au BDP")
+```
+
+La topographie ne semble pas avoir d'influence significative sur la diversité spécifique au sein de la strate arbustive.
+
+```{r}
+sjPlot::tab_model(glmB2,show.intercept = T)
+plot_model(glmB2, show.values = TRUE, width = 0.1, title = "Effet de l'exposition sur la diversité spécifique arbustive") +  ylab("Pourcentage d'espèces en plus par rapport N")
+```
+
+L'exposition ne semble pas être un facteur influençant la diversité spécifique de la strate arbustive. 
+
+```{r}
+sjPlot::tab_model(glmB3,show.intercept = T)
+plot_model(glmB3, show.values = TRUE, width = 0.1, title = "Effet de la topographie et de l'exposition sur la diversité spécifique arbustive") +  ylab("Pourcentage d'espèces en plus par rapport à BDP/N")
+```
+
+Lorsqu'on s'intéresse à l'effet combiné de la topographie et de l'exposition, aucun effet marqué n'est observé sur la diversité spécifique de la strate arbustive.
+
+
+
+
+### Arbres :
+
+On cherche à visualiser si le placement de la placette à différents niveaux d'une pente (haut, milieu et bas) peut influencer la richesse spécifique de sa strate arborée, le tout selon l'exposition.
+
+#### Nombre d'espèces par placette :
+
+Dans un premier temps, on cherche à avoir une liste qui contient le nombre d'espèces arborée par placette. 
+On importe le tableau des arbres :
+
+
+```{r}
+presence_arbre<- grep("Presence", names(arbresp))
+
+nbspA <- c()
+for (i in presence_arbre){
+  s <- sum(arbresp[,i])
+  s
+  nbspA <- c(nbspA,s)
+}
+```
+
+#### Affichage de la diversité spécifique de la strate arborée dans placettes en fonction de leur topographie et de leur exposition :
+
+Il s'agit maintenant de créer un tableau "à la main" regroupant ces résultats avec la topographie de chaque placette (Haut de pente = HDP, Milieu de pent = MDP, Bas de pente = BDP) et leur exposition (Sud = S, Nord = N).
+
+```{r tableau avec données arborées par placettes, include = FALSE}
+tabA <- data.frame(
+  Placette = numplct,
+  Topographie = topographie,
+  Exposition = expo,
+  Nombre_espece =nbspA)
+```
+```{r}
+tabA
+```
+
+```{r boxplot arbre, include = FALSE}
+library('tidyverse')
+figA <- ggplot(tabA, aes(x = Topographie, y = Nombre_espece, color = Topographie, alpha = Exposition)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle('Diversité spécifique de la strate arborée en fonction de la topographie des placettes et de leur exposition') + xlab('Topographie') + ylab("Nombre d'espèces")
+
+figureA <- figA + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+```
+```{r}
+figureA
+```
+
+#### Représentations des effets de la topographie et de l'exposition sur la diversité spécifique arbustive :
+
+On cherche à voir s'il y a des différences significatives dans la diversité spécifique de la strate arborée selon l'exposition et la topographie des placettes.
+
+```{r, include=FALSE}
+glmA1 <- glm(Nombre_espece~Topographie, data=tabA, family = "poisson")
+glmA2 <- glm(Nombre_espece~Exposition, data=tabA, family = "poisson")
+glmA3 <- glm(Nombre_espece~Exposition*Topographie, data= tabA,family = "poisson")
+```
+
+```{r}
+sjPlot::tab_model(glmA1,show.intercept = T)
+plot_model(glmA1, show.values = TRUE, width = 0.1, title = "Effet de la topographie sur la diversité spécifique arborée") +  ylab("Pourcentage d'espèces en plus par rapport au BDP")
+```
+
+On constate que la diversité spécifique de la strate arborée est bien moins importante en MDP qu'en BDP, ce qui est encore plus marqué entre le HDP et le BDP.
+
+```{r}
+sjPlot::tab_model(glmA2,show.intercept = T)
+plot_model(glmA2, show.values = TRUE, width = 0.1, title = "Effet de l'exposition sur la diversité spécifique arborée") +  ylab("Pourcentage d'espèces en plus par rapport N")
+```
+
+L'exposition ne semble pas être un facteur influençant la diversité spécifique de la strate arborée. 
+
+```{r}
+sjPlot::tab_model(glmA3,show.intercept = T)
+plot_model(glmA3, show.values = TRUE, width = 0.1, title = "Effet de la topographie et de l'exposition sur la diversité spécifique arborée") +  ylab("Pourcentage d'espèces en plus par rapport à BDP/N")
+```
+
+Lorsqu'on s'intéresse à l'effet combiné de la topographie et de l'exposition, aucun effet marqué n'est observé sur la diversité spécifique de la strate arbustive. Toutefois, ce modèle accorde davantage de significativité à l'effet de la topographie donné ci-dessus. 
+
+
+
+
+
+### Diversité spécifique selon les vallons en fonction de la topographie et de l'exposition :
+
+```{r}
+vallon <- c('Montrond','Montrond','Montrond','Montrond','Montrond','Montrond','Montrond','Montrond','Montrond','Montrond','Montrond','Montrond','Cure','Cure','Cure','Cure','Cure','Cure','Cure','Cure','Cure','Cure','Cure','Cure','Montrond','Montrond','Montrond','Montrond','Montrond','Montrond')
+```
+
+On cherche à visualiser si le placement de la placette à différents niveaux d'une pente (haut, milieu et bas) peut influencer sa richesse spécifique 
+
+### Total :
+
+On reprend les tableaux généraux :
+
+```{r tableau avec données par placettes, include = FALSE}
+tabvallonTot <- data.frame(
+  Placette = numplct,
+  Topographie = topographie,
+  Exposition = expo,
+  Nombre_espece =lnb,
+  Vallon = vallon)
+```
+```{r}
+tabvallonTot
+```
+
+
+Puis on affiche ce tableau en boxplot en prenant en compte :
+
+### Vallon :
+
+```{r boxplot vallon, include = FALSE}
+library('tidyverse')
+fig_val_tot <- ggplot(tabvallonTot, aes(x = Vallon, y = Nombre_espece, color = Vallon)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle('Diversité spécifique générale en fonction du vallon') + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_val_tot <- fig_val_tot + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_val_tot <- glm(Nombre_espece~Vallon, data = tabvallonTot, family = "poisson")
+
+```
+```{r}
+figure_val_tot
+sjPlot::tab_model(glm_val_tot,show.intercept = T)
+plot_model(glm_val_tot, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique totale") +  ylab("Pourcentage d'espèces en plus par rapport au vallon de la Cure")
+```
+On observe que le vallon de Montrond est moins riche en espèces que le vallon de la Cure.
+
+### Vallon et Topographie :
+
+```{r boxplot vallon topo, include = FALSE}
+library('tidyverse')
+fig_valtop_tot <- ggplot(tabvallonTot, aes(x = Topographie, y = Nombre_espece, color = Vallon)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle('Diversité spécifique générale en fonction du vallon et de la topographie') + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_valtop_tot <- fig_valtop_tot + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_valtop_tot <- glm(Nombre_espece~Vallon*Topographie, data = tabvallonTot, family = "poisson")
+
+```
+```{r}
+figure_valtop_tot
+sjPlot::tab_model(glm_valtop_tot,show.intercept = T)
+plot_model(glm_valtop_tot, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique totale selon la topographie") +  ylab("Pourcentage d'espèces en plus par rapport au vallon de la Cure en BDP")
+```
+
+En moyenne, le MDP est plus diversifié que le BDP de la Cure. Toutefois, le MDP de la Cure est beaucoup plus riche le BDP de la Cure, car le MDP de Montrond l'est moins.
+
+### Vallon et Exposition :
+
+```{r boxplot vallon exposition, include = FALSE}
+library('tidyverse')
+fig_valexpo_tot <- ggplot(tabvallonTot, aes(x = Vallon, y = Nombre_espece, color = Exposition)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle("Diversité spécifique générale en fonction du vallon et de l'exposition") + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_valexpo_tot <- fig_valexpo_tot + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_valexpo_tot <- glm(Nombre_espece~Vallon*Exposition, data = tabvallonTot, family = "poisson")
+```
+```{r}
+figure_valexpo_tot
+sjPlot::tab_model(glm_valexpo_tot,show.intercept = T)
+plot_model(glm_valexpo_tot, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique totale selon l'exposition") +  ylab("Pourcentage d'espèces en plus par rapport au vallon de la Cure au Nord")
+```
+
+Si le vallon de la Cure est en moyenne plus diversifié que celui de Montrond, on observe que le Sud de ce dernier est bien plus riche que le Nord de la Cure. On en déduit que le Nord de Montrond est beaucoup plus pauvre que celui de la Cure.
+
+### Vallon, Topographie et Exposition :
+
+```{r boxplot vallon topo expo, include = FALSE}
+library('tidyverse')
+fig_valtopexpo_tot <- ggplot(tabvallonTot, aes(x = Topographie, y = Nombre_espece, color = Exposition, alpha = Vallon)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle("Diversité spécifique générale en fonction du vallon, de l'exposition et de la topographie") + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_valtopexpo_tot <- fig_valtopexpo_tot + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_valtopexpo_tot <- glm(Nombre_espece~Vallon*Exposition*Topographie, data = tabvallonTot, family = "poisson")
+
+```
+```{r}
+figure_valtopexpo_tot
+sjPlot::tab_model(glm_valtopexpo_tot,show.intercept = T)
+plot_model(glm_valtopexpo_tot, value.offset = 0.4, value.size = 3, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique totale selon la topographie et l'exposition") +  ylab("Pourcentage d'espèces en plus par rapport au vallon de la Cure en BDP/Nord")
+```
+
+Si rien n'est vraiment significatif, il semblerait que le HDP de Montrond soit moins riche que le BDP/Nord de la Cure.
+
+## Herbacées :
+
+On reprend les tableaux généraux :
+
+```{r tableau avec données herbacées par placettes selon le vallon, include = FALSE}
+tabvallonHerb <- data.frame(
+  Placette = numplct,
+  Topographie = topographie,
+  Exposition = expo,
+  Nombre_espece =nbspH,
+  Vallon = vallon)
+```
+```{r}
+tabvallonHerb
+```
+
+
+Puis on affiche ce tableau en boxplot en prenant en compte :
+
+### Vallon :
+
+```{r boxplot vallon herb, include = FALSE}
+library('tidyverse')
+fig_val_H <- ggplot(tabvallonHerb, aes(x = Vallon, y = Nombre_espece, color = Vallon)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle('Diversité spécifique herbacée en fonction du vallon') + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_val_H <- fig_val_H + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_val_H <- glm(Nombre_espece~Vallon, data = tabvallonHerb, family = "poisson")
+
+```
+```{r}
+figure_val_H
+sjPlot::tab_model(glm_val_H,show.intercept = T)
+plot_model(glm_val_H, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique herbacée") +  ylab("Pourcentage d'espèces en plus par rapport au vallon de la Cure")
+```
+On constate qu'il n'y a pas d'effet significatif du vallon sur la diversité spécifique dans la strate herbacée.
+
+
+### Vallon et Topographie :
+
+```{r boxplot vallon topo herb, include = FALSE}
+library('tidyverse')
+fig_valtop_H <- ggplot(tabvallonHerb, aes(x = Topographie, y = Nombre_espece, color = Vallon)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle('Diversité spécifique herbacée en fonction du vallon') + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_valtop_H <- fig_valtop_H + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_valtop_H <- glm(Nombre_espece~Vallon*Topographie, data = tabvallonHerb, family = "poisson")
+
+```
+```{r}
+figure_valtop_H
+sjPlot::tab_model(glm_valtop_H,show.intercept = T)
+plot_model(glm_valtop_H, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique herbacée selon la topographie") +  ylab("Pourcentage d'espèces en plus par rapport au vallon de la Cure en BDP")
+```
+On observe que les milieux de pente des deux vallons ont une diversité spécifique significativement différente. En effet, le milieu de pente est en moyenne 1,6 fois plus riche en espèces que le BDP du vallon de la Cure. A priori, en milieu de pente, la diversité spécifique est plus forte à la Cure qu'à Montrond.
+
+### Vallon et Exposition :
+
+```{r boxplot vallon exposition herbacé, include = FALSE}
+library('tidyverse')
+fig_valexpo_H <- ggplot(tabvallonHerb, aes(x = Vallon, y = Nombre_espece, color = Exposition)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle("Diversité spécifique herbacée en fonction du vallon et de l'exposition") + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_valexpo_H <- fig_valexpo_H + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_valexpo_H <- glm(Nombre_espece~Vallon*Exposition, data = tabvallonHerb, family = "poisson")
+
+```
+```{r}
+figure_valexpo_H
+sjPlot::tab_model(glm_valexpo_H,show.intercept = T)
+plot_model(glm_valexpo_H, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique herbacée en fonction de l'exposition") +  ylab("Pourcentage d'espèces en plus par rapport au Nord de la Cure")
+```
+Dans l'ensemble, le vallon de Montrond est significativement moins riche en espèces herbacées que le Nord du Vallon de la Cure. Comme le Sud de Montrond est beaucoup plus riche en espèces herbacées que le Nord de la Cure, on en déduit que le Nord de Montrond est plus pauvre que le Nord de la Cure. 
+
+### Vallon, Topographie et Exposition :
+
+```{r boxplot vallon topo expo herbacé, include = FALSE}
+library('tidyverse')
+fig_valtopexpo_H <- ggplot(tabvallonHerb, aes(x = Topographie, y = Nombre_espece, color = Exposition, alpha = Vallon)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle("Diversité spécifique en herbacée en fonction du vallon, de la topo et de l'exposition") + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_valtopexpo_H <- fig_valtopexpo_H + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_valtopexpo_H <- glm(Nombre_espece~Vallon*Exposition*Topographie, data = tabvallonHerb, family = "poisson")
+
+```
+```{r}
+figure_valtopexpo_H
+sjPlot::tab_model(glm_valtopexpo_H,show.intercept = T)
+plot_model(glm_valtopexpo_H, value.offset = 0.4, value.size = 3, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique herbacée en fonction de l'exposition et de la topographie") +  ylab("Pourcentage d'espèces en plus par rapport au Nord de la Cure en BDP")
+```
+Avec un modèle plus complexe (plus réaliste ?), le vallon n'apporte aucune variabilité dans la richesse spécifique. Le MDP et le HDP de Montrond sont significativement moins riches en espèces herbacées que le BDP/Nord de la Cure. En revanche, le HDP/Sud de Montrond est beaucoup plus riche que le BDP/Nord de la Cure.
+
+## Arbustes :
+
+On reprend les tableaux généraux :
+
+```{r tableau avec données arbustes par placettes selon le vallon, include = FALSE}
+tabvallonB <- data.frame(
+  Placette = numplct,
+  Topographie = topographie,
+  Exposition = expo,
+  Nombre_espece =nbspB,
+  Vallon = vallon)
+```
+```{r}
+tabvallonB
+```
+
+
+Puis on affiche ce tableau en boxplot en prenant en compte :
+
+### Vallon :
+
+```{r boxplot vallon arbustif, include = FALSE}
+library('tidyverse')
+fig_val_B <- ggplot(tabvallonB, aes(x = Vallon, y = Nombre_espece, color = Vallon)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle('Diversité spécifique arbustive en fonction du vallon') + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_val_B <- fig_val_B + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_val_B <- glm(Nombre_espece~Vallon, data = tabvallonB, family = "poisson")
+
+```
+```{r}
+figure_val_B
+sjPlot::tab_model(glm_val_B,show.intercept = T)
+plot_model(glm_val_B, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique arbustive") +  ylab("Pourcentage d'espèces en plus par rapport au vallon de la Cure")
+```
+On constate qu'il n'y a pas d'effet significatif du vallon sur la diversité spécifique dans la strate arbustive. Toutefois, on est proche de la significativité et il faudrait davantage de données pour confirmer que la strate arbustive du vallon de la Cure est plus diversifiée que celui de Montrond.
+
+### Vallon et Topographie :
+
+```{r boxplot vallon topo arbustif, include = FALSE}
+library('tidyverse')
+fig_valtop_B <- ggplot(tabvallonB, aes(x = Topographie, y = Nombre_espece, color = Vallon)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle('Diversité spécifique arbustive en fonction du vallon') + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_valtop_B <- fig_valtop_B + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_valtop_B <- glm(Nombre_espece~Vallon*Topographie, data = tabvallonB, family = "poisson")
+```
+```{r}
+figure_valtop_B
+sjPlot::tab_model(glm_valtop_B,show.intercept = T)
+plot_model(glm_valtop_B, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique arbustive selon la topographie") +  ylab("Pourcentage d'espèces en plus par rapport au vallon de la Cure en BDP")
+```
+On constate qu'il n'y a pas d'effet significatif du vallon sur la diversité spécifique dans la strate arbustive lorsqu'on considère la topographie.
+
+
+
+### Vallon et Exposition :
+
+```{r boxplot vallon exposition arbustif, include = FALSE}
+library('tidyverse')
+fig_valexpo_B <- ggplot(tabvallonB, aes(x = Vallon, y = Nombre_espece, color = Exposition)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle("Diversité spécifique arbustive en fonction du vallon et de l'exposition") + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_valexpo_B <- fig_valexpo_B + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_valexpo_B <- glm(Nombre_espece~Vallon*Exposition, data = tabvallonB, family = "poisson")
+
+```
+```{r}
+figure_valexpo_B
+sjPlot::tab_model(glm_valexpo_B,show.intercept = T)
+plot_model(glm_valexpo_B, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique arbustive en fonction de l'exposition") +  ylab("Pourcentage d'espèces en plus par rapport au Nord de la Cure")
+```
+On constate qu'il n'y a pas d'effet significatif du vallon sur la diversité spécifique dans la strate arbustive lorsque l'on considère l'exposition.
+
+
+### Vallon, Topographie et Exposition :
+
+```{r boxplot vallon topo expo arbustif, include = FALSE}
+library('tidyverse')
+fig_valtopexpo_B <- ggplot(tabvallonB, aes(x = Topographie, y = Nombre_espece, color = Exposition, alpha = Vallon)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle("Diversité spécifique en arbuste en fonction du vallon, de la topo et de l'exposition") + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_valtopexpo_B <- fig_valtopexpo_B + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_valtopexpo_B <- glm(Nombre_espece~Vallon*Exposition*Topographie, data = tabvallonB, family = "poisson")
+
+```
+```{r}
+figure_valtopexpo_B
+sjPlot::tab_model(glm_valtopexpo_B,show.intercept = T)
+plot_model(glm_valtopexpo_B, value.offset = 0.4, value.size = 3, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique des arbustes en fonction de l'exposition et de la topographie") +  ylab("Pourcentage d'espèces en plus par rapport au Nord de la Cure en BDP")
+```
+On constate qu'il n'y a pas d'effet significatif du vallon sur la diversité spécifique dans la strate arbustive lorqu'on considère l'exposition et la topographie.
+
+
+
+## Arbres :
+
+On reprend les tableaux généraux :
+
+```{r tableau avec données arborées par placettes selon le vallon, include = FALSE}
+tabvallonA <- data.frame(
+  Placette = numplct,
+  Topographie = topographie,
+  Exposition = expo,
+  Nombre_espece =nbspA,
+  Vallon = vallon)
+```
+```{r}
+tabvallonA
+```
+
+
+Puis on affiche ce tableau en boxplot en prenant en compte :
+
+### Vallon :
+
+```{r boxplot vallon arboré, include = FALSE}
+library('tidyverse')
+fig_val_A <- ggplot(tabvallonA, aes(x = Vallon, y = Nombre_espece, color = Vallon)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle('Diversité spécifique arborée en fonction du vallon') + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_val_A <- fig_val_A + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_val_A <- glm(Nombre_espece~Vallon, data = tabvallonA, family = "poisson")
+
+```
+```{r}
+figure_val_A
+sjPlot::tab_model(glm_val_A,show.intercept = T)
+plot_model(glm_val_A, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique arbuorée") +  ylab("Pourcentage d'espèces en plus par rapport au vallon de la Cure")
+```
+On constate qu'il n'y a pas d'effet significatif du vallon sur la diversité spécifique dans la strate arborée.
+
+### Vallon et Topographie :
+
+```{r boxplot vallon topo arbres, include = FALSE}
+library('tidyverse')
+fig_valtop_A <- ggplot(tabvallonA, aes(x = Topographie, y = Nombre_espece, color = Vallon)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle('Diversité spécifique arbborée en fonction du vallon') + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_valtop_A <- fig_valtop_A + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_valtop_A <- glm(Nombre_espece~Vallon*Topographie, data = tabvallonA, family = "poisson")
+```
+```{r}
+figure_valtop_A
+sjPlot::tab_model(glm_valtop_A,show.intercept = T)
+plot_model(glm_valtop_A, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique arborée selon la topographie") +  ylab("Pourcentage d'espèces en plus par rapport au vallon de la Cure en BDP")
+```
+On constate qu'il n'y a pas d'effet significatif du vallon sur la diversité spécifique dans la strate arborée lorsque l'on considère la topographie.
+
+
+### Vallon et Exposition :
+
+```{r boxplot vallon exposition arborée, include = FALSE}
+library('tidyverse')
+fig_valexpo_A <- ggplot(tabvallonA, aes(x = Vallon, y = Nombre_espece, color = Exposition)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle("Diversité spécifique arborée en fonction du vallon et de l'exposition") + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_valexpo_A <- fig_valexpo_A + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_valexpo_A <- glm(Nombre_espece~Vallon*Exposition, data = tabvallonA, family = "poisson")
+
+```
+```{r}
+figure_valexpo_A
+sjPlot::tab_model(glm_valexpo_A,show.intercept = T)
+plot_model(glm_valexpo_A, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique arborée en fonction de l'exposition") +  ylab("Pourcentage d'espèces en plus par rapport au Nord de la Cure")
+```
+
+On constate qu'il n'y a pas d'effet significatif du vallon sur la diversité spécifique dans la strate arborée lorsque l'on considère l'exposition.
+
+### Vallon, Topographie et Exposition :
+
+```{r boxplot vallon topo expo arboré, include = FALSE}
+library('tidyverse')
+fig_valtopexpo_A <- ggplot(tabvallonA, aes(x = Topographie, y = Nombre_espece, color = Exposition, alpha = Vallon)) + geom_boxplot(outlier.color = 'magenta', outlier.shape = 8, outlier.size = 2) + ggtitle("Diversité spécifique en arbres en fonction du vallon, de la topo et de l'exposition") + xlab('Vallon') + ylab("Nombre d'espèces")
+
+figure_valtopexpo_A <- fig_valtopexpo_A + theme(
+  plot.title = element_text(color ='black', size = 16, face = "bold"),
+  axis.title.x = element_text(color = 'blue', size = 13, face = "italic"),
+  axis.title.y = element_text(color = 'blue', size = 14, face = "italic")
+)
+
+glm_valtopexpo_A <- glm(Nombre_espece~Vallon*Exposition*Topographie, data = tabvallonA, family = "poisson")
+
+```
+```{r}
+figure_valtopexpo_A
+sjPlot::tab_model(glm_valtopexpo_A,show.intercept = T)
+plot_model(glm_valtopexpo_A, value.offset = 0.4, value.size = 3, show.values = TRUE, width = 0.1, title = "Effet du vallon sur la diversité spécifique des arbustes en fonction de l'exposition et de la topographie") +  ylab("Pourcentage d'espèces en plus par rapport au Nord de la Cure en BDP")
+```
+
+On constate qu'il n'y a pas d'effet significatif du vallon sur la diversité spécifique dans la strate arborée lorsque l'on considère la topographie et l'exposition des placettes.
