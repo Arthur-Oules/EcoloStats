@@ -1,0 +1,1099 @@
+---
+title: "Structure_Forestiere_BCP"
+format: html
+editor: visual
+---
+
+# TP Ecolostat - Structure forestière
+
+## Quel est l'effet de la topographie sur les dynamiques forestières?
+
+### Introduction
+
+#### Importation des bibliothèques:
+
+```{r}
+#| label: importation packages
+#| output: false
+
+library(here)
+library(readxl)
+library(dplyr)
+library(readODS)
+library(patchwork)
+library(FactoMineR)
+library(factoextra) #Les packages FactoMineR et factoextra sont nécessaires pour la réalisation de l'analyse multivariée.
+library(MASS) #Le package MASS est nécessaire pour la réalisation de l'analyse discriminante.
+library(performance)
+library(tidyverse)
+
+```
+
+#### Chargement des données
+
+##### Extraction des feuilles des fichiers excel:
+
+Concaténation des feuilles de calcul Excel en une même variable pour chaque paramètre étudié. Les valeurs "NA" sont remplacées par "0", ce qui correspond à l'absence de dénombrement d'individus dans les classes de taille et circonférence.
+
+```{r}
+#| label: importation des données
+NomsPlacettes<-excel_sheets("Data/DonneesArbresVivants.xlsx")
+DataArbresVivants<-lapply(NomsPlacettes,function(nom){
+  tmp<-read_excel(here("Data/DonneesArbresVivants.xlsx"),sheet=nom)
+  tmp$placette=nom
+  return(tmp)
+})
+DataArbresVivants<-bind_rows(DataArbresVivants)
+DataArbresVivants<-DataArbresVivants %>% replace(is.na(.),0)
+# forme un tableau où toutes les données d'arbres vivants sont répertoriées, les données sont associées à leur numéro de placette
+
+NomsPlacettes<-excel_sheets("Data/DonneesArbresMorts.xlsx")
+DataArbresMorts<-lapply(NomsPlacettes,function(nom){
+  tmp<-read_excel(here("Data/DonneesArbresMorts.xlsx"),sheet=nom)
+  tmp$placette=nom
+  return(tmp)
+})
+DataArbresMorts<-bind_rows(DataArbresMorts)
+DataArbresMorts<-DataArbresMorts %>% replace(is.na(.),0)
+# forme un tableau où toutes les données d'arbres morts sont répertoriées, les données sont associées à leur numéro de placette
+
+
+NomsPlacettes<-excel_sheets("Data/DonneesBoisMortSol.xlsx")
+DataBoisMortSol<-lapply(NomsPlacettes,function(nom){
+  tmp<-read_excel(here("Data/DonneesBoisMortSol.xlsx"),sheet=nom)
+  tmp$placette=nom
+  return(tmp)
+})
+DataBoisMortSol<-bind_rows(DataBoisMortSol)
+DataBoisMortSol<-DataBoisMortSol %>% replace(is.na(.),0)
+# forme un tableau où toutes les données d'arbres morts au sol (comptage sous un transect) sont répertoriées, les données sont associées à leur numéro de placette
+
+DataPlacettes <- read_excel(here('Data/DonneesPlacettes.xlsx')) # lecture du fichier avec les données sur les placettes
+
+#Ajout d'une colonne topographie et d'une colonne catégorielle d'altitude: Versant N, Versant S ou Fond de Vallée; et Haut de Pente ou Bas de Pente
+
+Topo <- c('N','N','N','N','FV','FV','FV','FV','S','S','S','S','S','S') 
+#Ajout de la donnée Versant Nord, Versant Sud ou Fond de Vallée
+
+DataPlacettes2 <- cbind(DataPlacettes, Topo) # Ajout de la colonne au tableau
+
+Alt_cat <- c('HP','HP','HP','HP','BP','BP','BP','BP','HP','HP','HP','HP','HP','HP')
+#Ajout de la donnée haut/bas de pente
+
+DataPlacettes2 <- cbind(DataPlacettes2, Alt_cat)
+```
+
+### I - Analyses exploratoires et formulation des premières questions biologiques
+
+#### A - Analyse factorielle des correspondances (AFC)
+
+L'AFC est une méthode statistique d'analyses factorielles qui permet l'analyse de tableaux et qui est adaptée aux données de comptage.
+
+Dans un premier temps, on prépare les données sous la forme d'un tableau de contingence compatible à l'AFC. L'AFC est réalisée via la fonction CA() du package FactoMineR.
+
+```{r}
+
+DataPlacettesEffSp<-DataArbresVivants%>%
+  dplyr::select(Espece,Total,placette)%>% #Permet d'extraire les valeurs d'intérêt des données brutes.
+  left_join(DataPlacettes2,by=join_by("placette"=="Site_Placette")) #Associe les données de "DataPlacettes2" à celles de "DataArbresVivants".
+
+DataPlacettesEffSp_wide <- DataPlacettesEffSp %>%
+  pivot_wider(names_from=Espece,values_from=Total) #Permet de transformer du format "long" en format "wide". names_from pour le nom de colonnes, et values, les valeurs dans les colonnes donc ici : names_from = le nom des espèces et values = effectif total des espèces sur la placette
+
+DataPlacettesEffSp_wide_df <- as.data.frame(DataPlacettesEffSp_wide[,c(25:46)]) #Seules les colonnes contenant les informations de comptages des espèces d'arbres sont conservées dans un dataframe.
+
+row.names(DataPlacettesEffSp_wide_df)<-DataPlacettesEffSp_wide$placette #Assignation des noms des lignes au Dataframe créé : nom des sites+placette.
+DataPlacettesEffSp_wide_df<-DataPlacettesEffSp_wide_df %>% replace(is.na(.),0) #Les valeurs NA sont remplacées par 0. 
+
+```
+
+```{r}
+#| label: Réalisation de l'AFC
+AFC_Placette_EffSp<-CA(DataPlacettesEffSp_wide_df) #Réalise l'AFC pour les différentes espèces. 
+#Les espèces n'ayant pas été recensées sur le terrain sont ignorées
+gg_AFC_explo<-fviz_ca_biplot(AFC_Placette_EffSp, max.overlaps=30, repel=T,title="AFC exploratoire du comptage des espèces d'arbres des sites prospectés \n du bois de Montrond (Chassagny)", col.row=c('Nord','Nord','Nord','Nord','Fond Vallée','Fond Vallée','Fond Vallée','Fond Vallée','Sud','Sud','Sud','Sud','Sud','Sud'),col.col="black")  #Permet d'afficher tous les noms d'espèce sur le graphe sans qu'ils ne se superposent.
+
+gg_AFC_explo<-gg_AFC_explo+labs(col="Topographie") +
+  scale_color_manual(values = c("#e3548c","skyblue", "#ffa600"))
+ggsave(filename=here("Results","AFC_explo.pdf"),plot=gg_AFC_explo,height=13,width=18)
+
+print(gg_AFC_explo)
+```
+
+On observe trois tendances de regroupement des placettes:
+
+-   Les sites 5 (Placettes A et B), 17 (Placettes A et B), 19 (Placettes A et B), semblent former un groupe via l'AFC. Or, ces sites correspondent aux sites prospectés sur le **versant Nord** éloigné de la rivière.
+
+-   Les sites 13 (Placettes A et B) et 14 (Placettes A et B) semblent former un groupe via l'AFC. Or, ces sites correspondent aux sites prospectés sur le **versant Sud** éloigné de la rivière.
+
+-   Les sites 15 (Placettes A et B) et 16 (Placettes A et B) semblent former un groupe via l'AFC. Or, ces sites correspondent aux sites prospectés au **fond de la Vallée**, proche de la rivière.
+
+Cette première étape nous permet de procéder ensuite aux analyses discriminantes.
+
+#### B - Analyses discriminantes linéaire (LDA)
+
+L'analyse discriminante permet de diviser les variables de notre jeu de données en trouvant les combinaisons de variables qui séparent au mieux les groupes de variables les uns des autres.
+
+Les résultats de l'AFC sous-tendent un groupement des variables en fonction de leur versant, et de leur position en bas de vallée en trois groupes : N (Nord), S (Sud) et FV (Fond de Vallée). L'analyse discriminante permet de confirmer cette séparation entre trois groupes.
+
+```{r}
+#| label: Réalisation de la LDA
+
+total_perspecies <- apply(DataPlacettesEffSp_wide_df,2,sum)
+DataPlacettesEffSp_wide_df_wozero <- DataPlacettesEffSp_wide_df[,total_perspecies>5]
+
+
+ldaTopo <- lda(DataPlacettesEffSp_wide_df_wozero,DataPlacettes2$Topo)
+# prédire les groupes à partir de la LDA
+lda.plotdf <- data.frame(group = DataPlacettes2$Topo, lda = predict(ldaTopo)$x)
+# Visualiser les sites réorganisés à partir de la LDA
+gg_lda_Topo<-ggplot(lda.plotdf) +
+  geom_point(aes(x = lda.LD1,
+                 y = lda.LD2,
+                 col = factor(group)),
+             size = 4) +
+  labs(color = "Groupes") +
+  ggtitle("LDA Topographie")+
+  scale_color_manual(values = c("#e3548c","skyblue", "#ffa600")) +
+  theme_classic() + # configuration de la figure pour la rendre plus belle
+  theme(axis.title = element_text(size = 18),
+        axis.text = element_text(size = 16),
+        legend.title = element_text(size = 20),
+        legend.text = element_text(size = 18),
+        title=element_text(size=20))
+ggsave(filename=here("Results","LDA_Topo.pdf"),plot=gg_lda_Topo,height=5,width=7) #Sauvegarde de la figure
+
+gg_lda_Topo
+
+# classification des objets en fonction de la LDA
+spe.class <- predict(ldaTopo)$class
+
+# probabilités que les objets appartiennent à chaque groupe à posteriori
+spe.post <- predict(ldaTopo)$posterior
+
+# tableau des classifications a priori et prédites
+print("Tableau des classifications a priori et prédites")
+(spe.table <- table(predict(ldaTopo)$class,DataPlacettes2$Topo))
+
+# proportion de classification correcte
+print("Proportion de classification correcte")
+diag(prop.table(spe.table, 1))
+# tester la séparation par discrimination
+```
+
+La proportion de classification correcte est égale à 1 pour chaque groupe. Les sites ont donc été séparés correctement dans leur groupe topographique respectif (Nord, Sud et Fond de Vallée) à partir de l'inventaire des espèces arborées recensées.
+
+Ces résultats coïncident avec les résultats de l'AFC exploratoire préalablement réalisée.
+
+### II - Effet de la topographie sur la répartition spécifique
+
+#### A - Ajout des informations sur le versant et la topographie:
+
+```{r}
+DataArbresVivantsTot <- DataArbresVivants %>%
+  left_join(DataPlacettes2, by = join_by("placette" == "Site_Placette"))
+# On ajoute les données de DataPlacettes à DataArbresVivants
+```
+
+#### B - Graphes des effets de versant (Nord et Sud) sur chaque espèce
+
+##### 1 - Carpinus betulus
+
+```{r}
+Data_Carpinus_betulus <- filter(DataArbresVivantsTot, Espece == 'Carpinus_betulus') # On prend uniquement les données relatives au charme
+
+Graph_Carpinus_betulus <-
+  ggplot(data = Data_Carpinus_betulus, aes(x = Versant, y = Total)) +
+  geom_boxplot(fill = "pink") + # Chaque espèce a une couleur assignée (elle reste la même dans tout le code)
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = .5) +
+  xlab('Versant') +
+  ylab('Nombre de charmes') +
+  ggtitle("Carpinus betulus")
+
+ggsave(filename = here("Results","Graph_Carpinus_betulus.pdf"), plot = Graph_Carpinus_betulus) # le graphe est sauvegardé dans le dossier Results
+```
+
+##### 2 - Acer campestre
+
+```{r}
+Data_Acer_campestre <- filter(DataArbresVivantsTot, Espece == 'Acer_campestre')
+
+Graph_Acer_campestre <-
+  ggplot(data = Data_Acer_campestre, aes(x = Versant, y = Total)) +
+  geom_boxplot(fill = "white") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = .5) +
+  xlab('Versant') +
+  ylab("Nombre d'érables champêtres") +
+  ggtitle("Acer campestre")
+
+ggsave(filename = here("Results","Graph_Acer_campestre.pdf"), plot = Graph_Acer_campestre)
+```
+
+##### 3 - Quercus sp (séparés)
+
+```{r}
+# Cette cellule traite toutes les espèces de chênes
+
+Data_Quercus_petraea <- filter(DataArbresVivantsTot, Espece == 'Quercus_petraea')
+
+Data_Quercus_pubescens <- filter(DataArbresVivantsTot, Espece == 'Quercus_pubescens')
+
+Data_Quercus_robur <- filter(DataArbresVivantsTot, Espece == 'Quercus_robur')
+
+Graph_Quercus_petraea <-
+  ggplot(data = Data_Quercus_petraea, aes(x = Versant, y = Total)) +
+  geom_boxplot(fill = "orange") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = .5) +
+  xlab('Versant') +
+  ylab('Nombre de chênes sessiles') +
+  ggtitle("Quercus petraea")
+
+Graph_Quercus_robur <-
+  ggplot(data = Data_Quercus_robur, aes(x = Versant, y = Total)) +
+  geom_boxplot(fill = "green") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = .5) +
+  xlab('Versant') +
+  ylab('Nombre de chênes pédonculés') +
+  ggtitle("Quercus robur")
+
+Graph_Quercus_pubescens <-
+  ggplot(data = Data_Quercus_pubescens, aes(x = Versant, y = Total)) +
+  geom_boxplot(fill = "yellow") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = .5) +
+  xlab('Versant') +
+  ylab('Nombre de chênes pubescents') +
+  ggtitle("Quercus pubescens")
+
+ggsave(filename = here("Results","Graph_Quercus_petraea.pdf"), plot = Graph_Quercus_petraea)
+
+ggsave(filename = here("Results","Graph_Quercus_robur.pdf"), plot = Graph_Quercus_robur)
+
+ggsave(filename = here("Results","Graph_Quercus_pubescens.pdf"), plot = Graph_Quercus_pubescens)
+```
+
+##### 4 - Fraxinus excelsior
+
+```{r}
+Data_Fraxinus_excelsior <- filter(DataArbresVivantsTot, Espece == 'Fraxinus_excelsior')
+
+Graph_Fraxinus_excelsior <- ggplot(data = Data_Fraxinus_excelsior, aes(x = Versant, y = Total)) +
+  geom_boxplot(fill = "lightblue") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = .5) +
+  labs(x = 'Versant', y = 'Nombre de frênes', title = "Fraxinus excelsior")
+
+ggsave(filename = here("Results","Graph_Fraxinus_excelsior.pdf"), plot = Graph_Fraxinus_excelsior)
+```
+
+##### 5 - Prunus avium
+
+```{r}
+Data_Prunus_avium <- filter(DataArbresVivantsTot, Espece == 'Prunus_avium')
+
+Graph_Prunus_avium <- ggplot(data = Data_Prunus_avium, aes(x = Versant, y = Total)) +
+  geom_boxplot(fill = "chocolate4") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = .5) +
+  labs(x = 'Versant', y = 'Nombre de merisiers', title = "Prunus avium")
+
+ggsave(filename = here("Results","Graph_Prunus_avium.pdf"), plot = Graph_Prunus_avium)
+```
+
+##### 6 - Prunus sp
+
+```{r}
+Data_Prunus_sp. <- filter(DataArbresVivantsTot, Espece == 'Prunus_sp.')
+
+Graph_Prunus_sp. <- ggplot(data = Data_Prunus_sp., aes(x = Versant, y = Total)) +
+  geom_boxplot(fill = "red") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = .5) +
+  labs(x = 'Versant', y = 'Nombre de pruniers', title = "Prunus sp.")
+
+ggsave(filename = here("Results","Graph_Prunus_sp.pdf"), plot = Graph_Prunus_sp.)
+```
+
+##### 7 - Ulmus sp
+
+```{r}
+Data_Ulmus_sp. <- filter(DataArbresVivantsTot, Espece == 'Ulmus_sp.')
+
+Graph_Ulmus_sp. <- ggplot(data = Data_Ulmus_sp., aes(x = Versant, y = Total)) +
+  geom_boxplot(fill = "purple") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = .5) +
+  labs(x = 'Versant', y = "Nombre d'ormes", title = "Ulmus_sp.")
+
+ggsave(filename = here("Results","Graph_Ulmus_sp.pdf"), plot = Graph_Ulmus_sp.)
+```
+
+##### 8 - Sorbus torminalis
+
+```{r}
+Data_Sorbus_torminalis <- filter(DataArbresVivantsTot, Espece == 'Sorbus_torminalis')
+
+Graph_Sorbus_torminalis <- ggplot(data = Data_Sorbus_torminalis, aes(x = Versant, y = Total)) +
+  geom_boxplot(fill = "blue") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = .5) +
+  labs(x = 'Versant', y = "Nombre d'aliziers des bois", title = "Sorbus_torminalis")
+
+ggsave(filename = here("Results","Graph_Sorbus_torminalis.pdf"), plot = Graph_Sorbus_torminalis)
+```
+
+##### 9 - Patchwork de tous les graphes avec 2 versants (Nord et Sud)
+
+```{r}
+Graph_tot <- Graph_Acer_campestre + Graph_Carpinus_betulus + Graph_Fraxinus_excelsior + Graph_Quercus_petraea + Graph_Quercus_pubescens + Graph_Quercus_robur + Graph_Prunus_avium + Graph_Prunus_sp. + Graph_Sorbus_torminalis + Graph_Ulmus_sp.
+# Crée un graphe avec tous les graphes d'espèces (grâce à la bibliothèque patchwork)
+
+Graph_tot
+ggsave(filename = here("Results","Graph_tot.pdf"), plot = Graph_tot, height = 13, width = 16)
+```
+
+On observe des différences de répartition entre versants Nord et Sud pour de nombreuses espèces: par exemple, on retrouve plus de chênes pubescents sur le versant Sud, et de chênes sessiles sur le versant Nord. Le charme semble être réparti équitablement entre les deux versants.
+
+##### 10 - Graphe de la répartition de Quercus sp en fonction des versants (N ou S)
+
+```{r}
+# Cette cellule permet de comparer les répartitions d'espèces de chêne selon le versant
+
+Data_Quercus_sp <- filter(DataArbresVivantsTot, Espece == 'Quercus_petraea' | Espece == 'Quercus_pubescens' | Espece == 'Quercus_robur')
+
+
+Graph_Quercus_sp <- ggplot(data = Data_Quercus_sp, aes(x = Versant, y = Total, fill = Espece)) +
+  geom_boxplot(pos = 'dodge') +
+  labs(
+    x = 'Versant',
+    y = 'Nombre de chênes',
+    title = 'Répartition des espèces de chêne par versant'
+  ) +
+  scale_fill_manual(values = c("orange","yellow","green"))
+  theme_classic()
+
+Graph_Quercus_sp
+ggsave(filename = here("Results","Graph_Quercus_sp.pdf"), plot = Graph_Quercus_sp)
+```
+
+Ici, on se concentre sur les différentes sous-espèces d'une même espèce, le chêne. On observe que la sous-espèce dépend du versant: chênes sessiles au Nord et chênes pubescents au Sud, comme trouvé précédemment.
+
+##### 11 - Graphe général de la répartition des espèces par versant
+
+```{r}
+Especes_presentes <- filter(DataArbresVivantsTot, 
+  Espece == 'Sorbus_torminalis' |
+  Espece == 'Prunus_avium'|
+  Espece == 'Quercus_petraea' |
+  Espece == 'Carpinus_betulus' |
+  Espece == 'Fraxinus_excelsior' |
+  Espece == 'Acer_campestre' |
+  Espece == 'Quercus_pubescens' |
+  Espece == 'Ulmus_sp.' |
+  Espece == 'Prunus_sp.' |
+  Espece == 'Quercus_robur' )
+# On ne considère que les espèces pour lesquelles on a au minimum 1 donnée
+
+Graph_Especes <- ggplot(data = Especes_presentes, 
+    aes(x = Versant, y = Total, fill = Espece)) +
+  geom_boxplot(pos = 'dodge') +
+  labs(x = 'Versant', y = "Nombre d'arbres par placettes") +
+  scale_fill_manual(values = c("white","pink","lightblue","chocolate4","red","orange","yellow","green","blue","purple"))
+
+Graph_Especes
+ggsave(filename = here("Results","Graph_Especes.pdf"), plot = Graph_Especes)
+```
+
+Ce graphe, plus général, centralise les données de comparaison des versants d'une autre manière, mais on y retrouve les mêmes résultats au niveau des différences de répartition spécifique.
+
+Ensuite, on a choisi de prendre en compte le fond de vallée comme troisième catégorie après l'AFC réalisée dans la partie I.
+
+#### C - Tous les graphes, avec une catégorie "Fond de Vallée"
+
+Les p-values sont calculées ultérieurement, et ajoutées dans les titres des graphiques manuellement pour la présentation des données.
+
+```{r}
+#### Carpinus betulus
+
+Graph_Carpinus_betulus2 <-
+  ggplot(data = Data_Carpinus_betulus, aes(x = Topo, y = Total)) +
+  geom_boxplot(fill = "pink") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5) +
+  xlab('Versant') +
+  ylab('Nombre de charmes') +
+  ggtitle("Carpinus betulus, p = 0.0004998") # ajout de la p-value déterminée dans la partie test du khi-2
+
+ggsave(filename = here("Results","Graph_Carpinus_betulus2.pdf"), plot = Graph_Carpinus_betulus2)
+
+#### Acer campestre
+
+Graph_Acer_campestre2 <-
+  ggplot(data = Data_Acer_campestre, aes(x = Topo, y = Total)) +
+  geom_boxplot(fill = "white") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5) +
+  xlab('Versant') +
+  ylab("Nombre d'érables champêtres") +
+  ggtitle("Acer campestre, p = 0.0009995")
+
+ggsave(filename = here("Results","Graph_Acer_campestre2.pdf"), plot = Graph_Acer_campestre2)
+
+#### Quercus sp
+
+Graph_Quercus_petraea2 <-
+  ggplot(data = Data_Quercus_petraea, aes(x = Topo, y = Total)) +
+  geom_boxplot(fill = "orange") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5) +
+  xlab('Versant') +
+  ylab('Nombre de chênes sessiles') +
+  ggtitle("Quercus petraea, p = 0.0004998")
+
+Graph_Quercus_robur2 <-
+  ggplot(data = Data_Quercus_robur, aes(x = Topo, y = Total)) +
+  geom_boxplot(fill = "green") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5) +
+  xlab('Versant') +
+  ylab('Nombre de chênes pédonculés') +
+  ggtitle("Quercus robur, p = 0.0004998")
+
+Graph_Quercus_pubescens2 <-
+  ggplot(data = Data_Quercus_pubescens, aes(x = Topo, y = Total)) +
+  geom_boxplot(fill = "yellow") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5) +
+  xlab('Versant') +
+  ylab('Nombre de chênes pubescents') +
+  ggtitle("Quercus pubescens, p = 0.0004998")
+
+ggsave(filename = here("Results","Graph_Quercus_petraea2.pdf"), plot = Graph_Quercus_petraea2)
+
+ggsave(filename = here("Results","Graph_Quercus_robur2.pdf"), plot = Graph_Quercus_robur2)
+
+ggsave(filename = here("Results","Graph_Quercus_pubescens2.pdf"), plot = Graph_Quercus_pubescens2)
+
+#### Fraxinus excelsior
+
+Graph_Fraxinus_excelsior2 <- ggplot(data = Data_Fraxinus_excelsior, aes(x = Topo, y = Total)) +
+  geom_boxplot(fill = "lightblue") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5) +
+  labs(x = 'Versant', y = 'Nombre de frênes', title = "Fraxinus excelsior, p = 0.03748")
+
+ggsave(filename = here("Results","Graph_Fraxinus_excelsior2.pdf"), plot = Graph_Fraxinus_excelsior2)
+
+#### Prunus avium
+
+Graph_Prunus_avium2 <- ggplot(data = Data_Prunus_avium, aes(x = Topo, y = Total)) +
+  geom_boxplot(fill = "chocolate4") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5) +
+  labs(x = 'Versant', y = 'Nombre de merisiers', title = "Prunus avium, p = 0.3448")
+
+ggsave(filename = here("Results","Graph_Prunus_avium2.pdf"), plot = Graph_Prunus_avium2)
+
+#### Prunus sp
+
+Graph_Prunus_sp.2 <- ggplot(data = Data_Prunus_sp., aes(x = Topo, y = Total)) +
+  geom_boxplot(fill = "red") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5) +
+  labs(x = 'Versant', y = 'Nombre de pruniers', title = "Prunus sp, p = 1")
+
+ggsave(filename = here("Results","Graph_Prunus_sp2.pdf"), plot = Graph_Prunus_sp.2)
+
+#### Ulmus sp
+
+Graph_Ulmus_sp.2 <- ggplot(data = Data_Ulmus_sp., aes(x = Topo, y = Total)) +
+  geom_boxplot(fill = "purple") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5) +
+  labs(x = 'Versant', y = "Nombre d'ormes", title = "Ulmus_sp, p = 1")
+
+ggsave(filename = here("Results","Graph_Ulmus_sp2.pdf"), plot = Graph_Ulmus_sp.2)
+
+#### Sorbus torminalis
+
+Graph_Sorbus_torminalis2 <- ggplot(data = Data_Sorbus_torminalis, aes(x = Topo, y = Total)) +
+  geom_boxplot(fill = "blue") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5) +
+  labs(x = 'Versant', y = "Nombre d'aliziers des bois", title = "Sorbus_torminalis, p = 0.003498")
+
+ggsave(filename = here("Results","Graph_Sorbus_torminalis2.pdf"), plot = Graph_Sorbus_torminalis2)
+```
+
+##### 1 - Patchwork de tous les graphes
+
+```{r}
+Graph_tot2 <- Graph_Acer_campestre2 + Graph_Carpinus_betulus2 + Graph_Fraxinus_excelsior2 + Graph_Quercus_petraea2 + Graph_Quercus_pubescens2 + Graph_Quercus_robur2 + Graph_Prunus_avium2 + Graph_Prunus_sp.2 + Graph_Sorbus_torminalis2 + Graph_Ulmus_sp.2
+
+Graph_tot2
+ggsave(filename = here("Results","Graph_tot2.pdf"), plot = Graph_tot2, height = 13, width = 16)
+```
+
+On remarque qu'en prenant en compte trois catégories, plus de différences émergent: en particulier, les charmes, qui semblaient précédemment avoir une répartition équitable entre versants, sont en réalité présents uniquement en fond de vallée.
+
+##### 2 - Graphe de la répartition de Quercus sp en fonction des versants (N, S, FV)
+
+```{r}
+Graph_Quercus_sp2 <- ggplot(data = Data_Quercus_sp, aes(x = Topo, y = Total, fill = Espece)) +
+  geom_boxplot(pos = 'dodge') +
+  labs(
+    x = 'Versant',
+    y = 'Nombre de chênes',
+    title = 'Répartition des espèces de chêne par versant'
+  ) +
+  scale_fill_manual(values = c("orange","yellow","green"))
+  theme_classic()
+
+Graph_Quercus_sp2
+ggsave(filename = here("Results","Graph_Quercus_sp2.pdf"), plot = Graph_Quercus_sp2)
+```
+
+```         
+De même, la répartition des sous-espèces de chênes se précise: le fond de vallée comporte des chênes pédonculés et sessiles, le versant Nord des chênes sessiles, et le versant Sud des chênes pubescents.
+```
+
+##### 3 - Graphe général de la répartition des espèces en prenant en compte le fond de vallée comme une 3e catégorie
+
+```{r}
+Graph_Especes2 <- ggplot(data = Especes_presentes, 
+    aes(x = Topo, y = Total, fill = Espece)) +
+  geom_boxplot(pos = 'dodge') +
+  labs(x = 'Topographie', y = "Nombre d'arbres par placettes") +
+  scale_fill_manual(values = c("white","pink","lightblue","chocolate4","red","orange","yellow","green","blue","purple"))
+
+Graph_Especes2
+ggsave(filename = here("Results","Graph_Especes2.pdf"), plot = Graph_Especes2)
+```
+
+Grâce à cette représentation, on voit bien les différences principales qui se dégagent, à savoir le charme, le chêne sessile et le chêne pubescent.
+
+#### D - Mise en place des tests statistiques
+
+##### 1 - Modèle linéaire généralisé
+
+On effectue un modèle linéaire généralisé en premier lieu, pour tester la corrélation entre effectif d'une espèce et topographie.
+
+```{r}
+
+glm_Carpinus_betulus <- glm(data = Data_Carpinus_betulus, Total ~ Topo, family = poisson())
+summary(glm_Carpinus_betulus) #utilisation d'un modèle GLM pour tester si l'effectif des arbres est corrélé à la topographie, comparaison à une distribution de Poisson
+
+glm_Quercus_pubescens <- glm(data = Data_Quercus_pubescens, Total ~ Topo, family = poisson)
+summary(glm_Quercus_pubescens) #idem mais sur les chênes Pubescents 
+
+glm_Quercus_petraea <- glm(data = Data_Quercus_petraea, Total ~ Topo, family = poisson)
+summary(glm_Quercus_petraea)# idem sur les chênes Sessiles
+```
+
+On voit des différences non significatives là où les distributions sont le plus clairement différentes (Quercus pubescens par exemple. On remarque également des différences significatives là où on remarquait des distributions similaires sur nos graphiques. La quantité de données est probablement trop faible pour que le modèle puisse fonctionner correctement.
+
+##### 2 - Tests du chi-2
+
+On teste par la suite la différence entre la répartition observée et une répartition uniforme grâce à un test du chi-2, moins puissant mais meilleur pour traiter des données moins fournies.
+
+```{r}
+dist_theo <- c(1/3, 1/3, 1/3) #distribution théorique
+#selon l'hypothèse nulle, la répartition des arbres ne dépend pas du versant (distribution uniforme)
+
+##### 1 - Acer campestre
+dist_obs_Acer_campestre <- tapply(Data_Acer_campestre$Total,Data_Acer_campestre$Topo,sum) #distribution observée
+
+chisq.test(dist_obs_Acer_campestre,p=dist_theo, simulate.p.value = T) # réalisation du test du khi-2
+
+##### 2 - Carpinus betulus
+dist_obs_Carpinus_betulus <- tapply(Data_Carpinus_betulus$Total,Data_Carpinus_betulus$Topo,sum) #distribution observée
+
+chisq.test(dist_obs_Carpinus_betulus,p=dist_theo, simulate.p.value = T)
+
+##### 3 - Fraxinus excelsior
+dist_obs_Fraxinus_excelsior <- tapply(Data_Fraxinus_excelsior$Total,Data_Fraxinus_excelsior$Topo,sum) #distribution observée
+
+chisq.test(dist_obs_Fraxinus_excelsior,p=dist_theo, simulate.p.value = T)
+
+##### 4 - Prunus avium
+dist_obs_Prunus_avium <- tapply(Data_Prunus_avium$Total,Data_Prunus_avium$Topo,sum) #distribution observée
+
+chisq.test(dist_obs_Prunus_avium,p=dist_theo, simulate.p.value = T)
+
+##### 5 - Prunus sp
+dist_obs_Prunus_sp. <- tapply(Data_Prunus_sp.$Total,Data_Prunus_sp.$Topo,sum) #distribution observée
+
+chisq.test(dist_obs_Prunus_sp.,p=dist_theo, simulate.p.value = T)
+
+##### 6 - Quercus petraea
+dist_obs_Quercus_petraea <- tapply(Data_Quercus_petraea$Total,Data_Quercus_petraea$Topo,sum) #distribution observée
+
+chisq.test(dist_obs_Quercus_petraea,p=dist_theo, simulate.p.value = T)
+
+##### 7 - Quercus pubescens
+dist_obs_Quercus_pubescens <- tapply(Data_Quercus_pubescens$Total,Data_Quercus_pubescens$Topo,sum) #distribution observée
+
+chisq.test(dist_obs_Quercus_pubescens,p=dist_theo, simulate.p.value = T)
+
+##### 8 - Quercus robur
+dist_obs_Quercus_robur <- tapply(Data_Quercus_robur$Total,Data_Quercus_robur$Topo,sum) #distribution observée
+
+chisq.test(dist_obs_Quercus_robur,p=dist_theo, simulate.p.value = T)
+
+##### 9 - Sorbus torminalis
+dist_obs_Sorbus_torminalis <- tapply(Data_Sorbus_torminalis$Total,Data_Sorbus_torminalis$Topo,sum) #distribution observée
+
+chisq.test(dist_obs_Sorbus_torminalis,p=dist_theo, simulate.p.value = T)
+
+##### 10 - Ulmus sp
+dist_obs_Ulmus_sp. <- tapply(Data_Ulmus_sp.$Total,Data_Ulmus_sp.$Topo,sum) #distribution observée
+
+chisq.test(dist_obs_Ulmus_sp.,p=dist_theo, simulate.p.value = T)
+```
+
+Toutes les distributions spécifiques sont significativement différentes d'une répartition aléatoire uniforme, sauf celle de l'orme et du prunier, parce que nous n'avons qu'une seule donnée, et celle du merisier. Ainsi nous déduisons que pour toutes les autres espèces, la répartition dépend de la topographie. Par exemple, il y a significativement plus de charmes en fond de vallée, de chênes pubescents en face sud et de chênes sessiles au Nord.
+
+### III - Effet de la topographie sur le diamètre des arbres vivants
+
+#### A - Tracé des graphes en J inversé de tous les arbres confondus
+
+```{r}
+
+diamètre <- DataArbresVivants %>%
+  summarize(across('25-34':'>125',sum)) %>%  #fait la somme par colonne 
+  pivot_longer(everything(), names_to = "diam", values_to = "nombre") %>% #modifie le tableau pour qu'il soit interprétable par ggplot
+  mutate(diam = factor(diam,levels=diam)) # afin que les classes de diamètres soient rangées dans le bon ordre 
+
+## tracé du graphique
+ggplot(data= diamètre) + 
+  geom_col(aes(x=diam,y=nombre))+
+  labs(title = paste("Graphe de l'effectif des arbres selon leur diamètre"))+
+  xlab("Diamètre des arbres")+
+  ylab("Nombre d'arbres")
+  
+```
+
+Nous remarquons que le graphique du nombre d'arbres en fonction de leur diamètre forme un J inversé, ce qui signifie que la forêt se renouvelle bien.
+
+#### B - Tracé des graphes en J inversé en fonction des placettes
+
+```{r}
+les_placettes <- DataArbresVivants$placette %>% unique() # création d'une liste avec le nom des placettes
+
+# création d'un boucle afin d'automatiser la création des graphes
+for (i in les_placettes){
+  gg <- DataArbresVivants %>%
+  filter(placette == i ) %>%   # filtre pour garder les lignes correspondant à la bonne placette
+  summarize(across('25-34':'>125',sum)) %>% # somme sur chaque colonne 
+  pivot_longer(everything(), names_to = "diam", values_to = "nombre") %>% 
+  mutate(diam = factor(diam, levels = diam)) %>% 
+    
+  #création des graphiques  
+  ggplot() + 
+  geom_col(aes(x= diam,y=nombre)) +
+  labs(title = paste("Graphe du diamètre des arbres pour le", i))+
+  xlab("Diamètre")+
+  ylab("Nombre d'arbres")
+  
+  ggsave(filename=here("Results", paste("graphe_diam_p",i,".pdf")), plot=gg)
+}
+```
+
+En comparant tous les graphes précédents, nous remarquons que les distributions sont différentes en fonctions des placettes (aucun test statistique n'a été réalisé), les placettes ayant l'air de se renouveler le plus sont surtout les placettes situées au Nord (placette 13 et 14) tandis que les placettes du Sud (5, 19 et 17) ont l'air beaucoup plus récentes (les diamètres les plus faibles sont fortement présents).
+
+#### C - Tracé en fonction des espèces
+
+Nous avons voulu tester si les distributions des diamètres des troncs des arbres dépendaient des espèces.
+
+```{r}
+les_especes <- Especes_presentes$Espece %>% unique() #création d'une liste avec les espèces répertoriées
+
+couleurs <- c("white","pink","lightblue","chocolate4","orange","yellow","green","blue","purple","red")#création d'un vecteur couleur pour mettre une couleur par espèces
+
+#création d'une boucle pour automatiser la création de graphiques
+for (i in les_especes){
+  gg <- DataArbresVivants %>%
+  filter(Espece == i ) %>% 
+  summarize(across('25-34':'>125',sum)) %>% 
+  pivot_longer(everything(), names_to = "diam", values_to = "nombre") %>% 
+  mutate(diam = factor(diam, levels = diam)) %>% 
+    
+  #création des graphiques
+  ggplot() + 
+  geom_col(aes(x= diam,y=nombre),fill=couleurs[[match(i, les_especes)]]) + #permet de faire correspondre chaque couleur à la bonne espèce
+  labs(title = paste("Graphe du nombre de", i, "en fonction du diamètre" ))
+  xlab("Diamètre")
+  ylab("Nombre d'arbres")
+  
+  ggsave(filename=here("Results", paste("graphe_diam",i,".pdf")), plot=gg)
+}
+```
+
+En observant les graphes réalisés ci-dessus, nous remarquons que les espèces telles que l'orme, le merisier, et le prunier ne possèdent pas assez d'individus (1 ou 2) pour analyser leur distribution. C'est le cas également pour l'alizier torminal, le frêne et l'érable champêtre (7 ou 8 individus). Le chêne pédonculé possède une distribution où les diamètres importants sont les plus nombreux, on suppose une population assez vieille de ces chênes. En revanche, la distribution de certaines suivent un tracé en J inversé, c'est le cas du charme, du chêne pubescent et du chêne pédonculé. Ces espèces se renouvellent donc efficacement.
+
+#### D - Tracé en fonction des 3 classes de topographies (Nord, Sud, Fond de vallée)
+
+Dans cette partie, nous avons voulu tester l'effet de la topographie sur les répartitions des diamètres des troncs d'arbres.
+
+```{r}
+
+DataArbresVivantsClasses<- DataArbresVivants %>%
+  left_join(DataPlacettes2, by = join_by("placette" == "Site_Placette")) #on associe chaque topo (FV,N ou S) aux placettes, sur chaque ligne
+
+#tracé de 3 graphiques différents en fonction de la topographie
+ggN <- DataArbresVivantsClasses %>%
+  filter(Topo == "N" ) %>% 
+  summarize(across('25-34':'>125',sum)) %>% 
+  pivot_longer(everything(), names_to = "diam", values_to = "nombre") %>% 
+  mutate(diam = factor(diam, levels = diam)) %>% 
+  ggplot() + 
+  geom_col(aes(x= diam,y=nombre),fill= "skyblue") + #chaque couleur correspond à une classe de topographie, elle est la même dans tout le code
+  labs(title = paste("Diamètre pour le N"))+
+  xlab("Diamètre")+
+  ylab("Nombre d'arbre")
+ 
+ggS <- DataArbresVivantsClasses %>%
+  filter(Topo == "S" ) %>% 
+  summarize(across('25-34':'>125',sum)) %>% 
+  pivot_longer(everything(), names_to = "diam", values_to = "nombre") %>% 
+  mutate(diam = factor(diam, levels = diam)) %>% 
+  ggplot() + 
+  geom_col(aes(x= diam,y=nombre),fill="#ffa600") +
+  labs(title = paste("Diamètre pour le S"))+
+  xlab("Diamètre")+
+  ylab("Nombre d'arbre")
+  
+ggFV <- DataArbresVivantsClasses %>%
+  filter(Topo == "FV" ) %>% 
+  summarize(across('25-34':'>125',sum)) %>% 
+  pivot_longer(everything(), names_to = "diam", values_to = "nombre") %>% 
+  mutate(diam = factor(diam, levels = diam)) %>% 
+  ggplot() + 
+  geom_col(aes(x= diam,y=nombre),fill="#e3548c" ) +
+  labs(title = paste("Diamètre pour le FV"))+
+  xlab("Diamètre")+
+  ylab("Nombre d'arbre")
+   
+#association des 3 graphiques grace à la bibliothèque patchwork
+gg3 <- ggS + ggN +  ggFV +
+ plot_annotation(title = 'Comparaison de la répartition des diamètres en fonction de la topographie')
+
+ggsave(filename=here("Results", "graphe_diam_topo.pdf"), plot=gg3)
+gg3
+
+
+```
+
+D'après le graphique précédent, nous remarquons que les arbres situés au sud possèdent un diamètre plus petit et sont donc plus jeunes. Au contraire, la population du fond de vallée semble vieillissante, de moins en moins de jeunes sont produits. La population du nord semble se maintenir correctement.
+
+#### E - Test du chi 2
+
+Nous avons réalisé un test du chi-2 afin de tester si la répartition des diamètres des arbres dépend de la topographie.
+
+```{r}
+
+# création d'un tableau interprétable pour la réalisation du test
+Data_khi_2_N <- DataArbresVivantsClasses %>%
+  filter(Topo== "N") %>% 
+  summarize(across('25-34':'>125',sum))
+
+Data_khi_2_S <- DataArbresVivantsClasses %>%
+  filter(Topo== "S") %>% 
+  summarize(across('25-34':'>125',sum))
+
+Data_khi_2_FV <- DataArbresVivantsClasses %>%
+  filter(Topo== "FV") %>% 
+  summarize(across('25-34':'>125',sum))
+
+Data_khi_2 <- bind_rows(Data_khi_2_N,Data_khi_2_S, Data_khi_2_FV)
+row.names(Data_khi_2)[row.names(Data_khi_2) == "1"] <- "N"
+row.names(Data_khi_2)[row.names(Data_khi_2) == "2"] <- "S"
+row.names(Data_khi_2)[row.names(Data_khi_2) == "3"] <- "FV"
+
+chisq.test(Data_khi_2, simulate.p.value = TRUE) #réalisation du test
+
+#Les lignes suivantes servent à retirer la classe de la fin car c'est une classe de taille supérieure aux autres. Elle regroupe donc des valeurs en réalité plus étalées, cela est donc peu cohérent pour comparer une répartition de classe de diamètre. Nous avons également retiré celle du début (25-34 cm) car 
+
+
+Data_khi_2_PV <- Data_khi_2 %>% 
+  dplyr::select(-one_of('25-34', '>125'))
+
+chisq.test(Data_khi_2_PV, simulate.p.value = TRUE)
+  
+```
+
+Dans les deux cas (avec et sans valeurs extrêmes), la différence est significative, cela signifie que la distribution du diamètre est différente en fonction de la topographie. Cette observation pourrait s'expliquer par une différence d'âge de la forêt entre les topographies. Le fait que toutes les espèces soient prises en compte dans l'analyse peut former un biais car d'après la partie II, nous avons vu que la répartition spécifique dépend de la topographie. Or les espèces n'ont pas les mêmes répartitions de diamètre du tronc (cf les diagrammes en J inversé). Ainsi, on ne peut pas affirmer que la topographie soit le seul facteur expliquant la différence de répartition constatée via ce test.
+
+### IV - Effet de la topographie sur la surface terrière et l'effectif d'arbres
+
+#### A - Surface terrière
+
+La surface terrière d'un arbre est la surface de la section de son tronc à 1,3m de hauteur (correspond au Diamètre conventionnel à Hauteur de Poitrine, DHP). Dans le cas d'une étude portant sur la structure forestière, on s'intéresse à la surface terrière d'un peuplement (notée G), exprimés en m²/ha.
+
+Cette méthode permet de comparer les peuplements entre eux en s'affranchissant des différences d'âge de peuplements)
+
+Les différentes classes de diamètres sont dans un premier temps centrées autour de leur valeur médiane.
+
+```{r}
+#| label: Calcul des surfaces terrières des placettes.
+Classes_Diam_Centrees <- data.frame(
+  Classe = c("25-34", "35-44", "45-54", "55-64", "65-74", "75-84", "85-94", "95-104", "105-114", "115-124", ">125"),
+  D_moyen_cm = c(29.5, 39.5, 49.5, 59.5, 69.5, 79.5, 89.5, 99.5, 109.5, 119.5, 130) #approximations (médiane)
+)
+
+DataArbresVivants2<- DataArbresVivants %>% 
+  dplyr::select(-c(14,13)) %>%#Suppression des colonnes parasites : total et hauteur des arbres max
+  filter(Espece!="Total")
+
+DataSurfTer <- DataArbresVivants2 %>%
+pivot_longer(cols = any_of(Classes_Diam_Centrees$Classe),
+            names_to = "Classe", values_to = "Effectif") %>%
+left_join(Classes_Diam_Centrees, by = "Classe") %>%
+filter(Effectif!=0)%>%
+mutate(SurfaceClasseTaillePlacette_m2=Effectif*pi*(D_moyen_cm/200)**2) %>% #surfaces terrières intermédiaires calculées. Conversion inclue en m²
+group_by(placette,)%>%
+summarise("G_m²/ha"=sum(SurfaceClasseTaillePlacette_m2)*25)#Retourne la somme des surfaces terrières individuelles permet l'obtention de la valeur de surface terrière G, avec conversion en m²/ha
+
+DataSurfTer$Topo<-c("Nord","Nord","Nord","Nord","Fond Vallée","Fond Vallée","Fond Vallée","Fond Vallée","Sud","Sud","Sud","Sud","Sud","Sud")
+head(DataSurfTer)
+```
+
+On représente la surface terrière des sites en fonction de leur topographie sous la forme de boxplot.
+
+```{r}
+#| label: Représentation de la Surface Terrière en fonction de la topographie
+gg_SurfTer <-
+  ggplot(data = DataSurfTer, aes(x = Topo, y = `G_m²/ha`)) +
+  geom_boxplot(fill=c("#e3548c","skyblue", "#ffa600"), color = "black") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = .5) +
+  xlab('Topographie') +
+  ylab('G (m²/ha)') +
+  ggtitle(" Surface Terrière (G) par site en fonction \n de leur topographie et du versant") #Graphique de la Surface Terrière
+
+ggsave(filename=here("Results","SurfTer_Topo.pdf"),plot=gg_SurfTer,height=6,width=9) #Sauvegarde de la figure
+gg_SurfTer
+```
+
+On observe une tendance selon laquelle G est plus importante en Fond de Vallée par rapport à celles au Nord et au Sud. On cherche à déterminer s'il existe une différence significative entre la surface terrière des placettes de différentes zones topographiques à l'aide d'un modèle linéaire.
+
+On réalise un modèle linéaire généralisé (GLM).
+
+```{r}
+#| label: Réalisation du modèle linéaire
+glm_SurfTer<-glm(data=DataSurfTer,`G_m²/ha`~Topo,family=gaussian()) #On utilise ici un modèle gaussien, supposant que la distribution est gaussienne.
+summary(glm_SurfTer)
+```
+
+On constate que l'effet sur la surface terrière des sites Nord d'une part, et des sites Sud d'autre part, ne sont pas significativement différents des sites du Fond de Vallée.
+
+```{r}
+#| label: Vérification des conditions pour l'utilisation d'un modèle linéaire
+# /!\ une requête d'installation de packages apparaît dans la console
+check_heteroscedasticity(glm_SurfTer)
+check_residuals(glm_SurfTer)
+plot(glm_SurfTer)
+
+pdf(here("Results", "Plot_Diag_glm_SurfTer.pdf")) #Sauvegarde des graphiques du diagnostic du modèle linéaire.
+plot(glm_SurfTer)
+dev.off()
+```
+
+-   Graphique des Résidus VS Valeurs prédites : On observe une dispersion des points sans patron. Les résidus sont indépendants et uniformément distribués.
+-   Graphique Normal QQ : On observe une linéarité des résidus standardisés sur la plupart des points. Certains point (5, 7 et 13) dévient de cette linéarité. On peut considérer que les résidus suivent une distribution normale standard.
+-   Graphique d'échelle localisé : On observe une dispersion des points sans patron. Les conditions d'application sont respectées.
+-   On s'affranchit du graphique testant les résidus sur l'effet de levier, ayant des données en classes. On considère que les conditions d'application d'un modèle linéaire gaussien sont remplies.
+-   L'hétéroscédasticité et la distribution uniforme des résidus ont parallèlement été vérifiées (grâce aux informations fournies via les fonctions du packages performance): homoscédasticité (p = 0.288), distribution uniforme (p = 0.701).
+
+On teste, en parallèle, ces différences de surface terrière en fonction de la topographie avec un test non paramétrique de Kruskal-Wallis, moins exigeant qu'un modèle linéaire gaussien sur ses conditions d'application.
+
+```{r}
+kruskal.test(data=DataSurfTer,`G_m²/ha`~Topo)
+```
+
+Le test de Kruskal-Wallis révèle que les différences de surface terrière en fonction de la topographie ne sont pas significatives avec une p-valeur de 0.3337 (\> 0.05).
+
+Il n'y a pas de différences significatives entre les surfaces terrières des différents sites par rapport à l'effet de leur topographie.
+
+#### B - Effectif d'arbres total par placette
+
+On souhaite étudier les variations des effectifs totaux des arbres de chaque placette en fonction de leur topographie à l'aide d'un GLM (Poisson) adapté à des données de comptages.
+
+Dans un premier temps, on filtre les données pertinentes pour la formation du modèle : l'effectif total des arbres par placette, et le nom de chaque placette.
+
+```{r}
+#| label: Mise en forme des données
+DataArbresPlacetteTopo<- DataArbresVivants
+DataArbresPlacetteTopo <- DataArbresPlacetteTopo %>%
+  filter(grepl("Total", Espece, ignore.case = TRUE)) %>% #ne conserve que la ligne "Total"
+  dplyr::select(-c(1:12,14)) #ne conserver que les colonnes pertinentes contenant les informations "Total" des effectifs d'arbres et de "Placette"
+DataArbresPlacetteTopo
+```
+
+On représente l'effectif total des arbres présents sur chaque site en fonction de la topographie du site sous forme de boxplot.
+
+```{r}
+#| label: Représentation des effectifs totaux des arbres par placette en fonction de la topographie
+gg_EffTotPlacette_Topo <-
+  ggplot(data = DataArbresPlacetteTopo, aes(x = Topo, y = Total)) +
+  geom_boxplot(fill=c("#e3548c","skyblue", "#ffa600"), color = "black") +
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = .5) +
+  xlab('Topographie') +
+  ylab("Effectif totaux d'arbres par placette") +
+  ggtitle(" Effectifs totaux des arbres par site en \n fonction de leur topographie et du versant") #Graphique de la Surface Terrière
+
+ggsave(filename=here("Results","EffTotPlacette_Topo.pdf"),plot=gg_EffTotPlacette_Topo,height=6,width=9) #Sauvegarde de la figure
+gg_EffTotPlacette_Topo
+```
+
+Les effectifs d'arbres au Sud semblent, graphiquement, plus importants que ceux du Nord et du fond de vallée.
+
+On réalise un GLM (Poisson) pour tester la différence entre les effectifs des sites de topographie différente par rapport à ce qui a été graphiquement observé.
+
+```{r}
+glm_EffPlacetteTopo<-glm(data=DataArbresPlacetteTopo,Total~Topo,family=poisson())
+summary(glm_EffPlacetteTopo)
+```
+
+On constate une différence significative entre les effectifs des arbres des sites sur le versant Sud par rapport aux effectifs du Fond de Vallée d'un ratio égal à exp(0.34) avec une p-value de 0.00244.
+
+On vérifie les conditions d'application du modèle linéaire généralisé (GLM Poisson).
+
+```{r}
+#| label: Vérification des conditions pour l'utilisation d'un modèle linéaire
+plot(glm_EffPlacetteTopo)
+
+pdf(here("Results", "Plot_Diag_lm_EffPlacetteTopo.pdf")) #Sauvegarde des graphiques du diagnostic du modèle linéaire.
+plot(glm_EffPlacetteTopo)
+dev.off()
+```
+
+-   Graphique des Résidus VS Valeurs prédites : On observe une dispersion des points sans patron. Les résidus sont indépendants et uniformément distribués.
+-   Graphique Normal QQ : On observe une linéarité des résidus standardisés sur la plupart des points. Certains point (11 et 13) dévient de cette linéarité. On peut considérer que les résidus suivent une distribution de Poisson standard.
+-   Graphique d'échelle localisé : On observe une dispersion des points sans patron. Les conditions d'application semblent respectées.
+-   On s'affranchit du graphique testant les résidus sur l'effet de levier, ayant des données en classes. On considère que les conditions d'application d'un modèle linéaire de Poisson sont remplies.
+
+#### C - Comparaison entre la Surface Terrière et les effectifs totaux des placettes en fonction de la topographie
+
+```{r}
+ggcomp <- gg_EffTotPlacette_Topo + gg_SurfTer
+  plot_annotation(title = 'Surface terrière et effectifs totaux en fonction de la topographie')
+ggsave(filename=here("Results","comp_surfter_eff.pdf"),plot=ggcomp,height=6,width=9)
+ggcomp
+
+```
+
+Nous remarquons que la surface terrière au sud est la plus faible (valeur médiane) tandis que l'effectif le plus élevé est celui du sud également. Cela implique que ce sont probablement des arbres plus fins (cette information est validée par la comparaison de la répartition des diamètre en fonction de la topographie (cf partie III - D)) et donc plus jeunes (au biais près des différences d'espèce).
+
+### V - Etude du bois mort
+
+#### A - Corrélation avec la biodiversité
+
+Après quelques recherches bibliographiques, nous avons vu que le volume de bois mort pouvait être corrélé à la biodiversité. Nous avons voulu tester cette correlation, en revanche, par manque de données, nous n'avons pas pu avoir accès au volume de bois mort, que nous avons donc remplacé par la quantité de bois mort comptabilisée par placette. De plus, la biodiversité sera approximée par le nombre d'espèces herbacées moyen par placette.
+
+```{r}
+#calcul du nombre d'espèces par quadrat et moyenne sur la placette pour toutes les placettes, fait par le groupe de travail "communauté des sous-bois"
+
+mean_esp_placette <- c()
+for (k in 1:14) {
+  recouvrement_herbacees <- read_ods(here("Data/RecouvrementHerbacees.ods"),
+  sheet = k )
+    s <- 0
+  for (i in 1:5) {
+    s <- s + length(na.omit(recouvrement_herbacees[[i + 4]]))
+  }
+  nb_esp_placette <- s/5
+  nb_esp_placette
+  mean_esp_placette = c(mean_esp_placette,nb_esp_placette)
+
+}
+mean_esp_placette <- as.data.frame(mean_esp_placette) %>% 
+  bind_cols(les_placettes) 
+
+colnames(mean_esp_placette)[2] <- "Placette"
+
+#création d'un tableau avec les données sur les arbres morts
+
+#ajout des informations de topographie
+DataArbresMortsClasses<- DataArbresMorts %>%
+  left_join(DataPlacettes2, by = join_by("placette" == "Site_Placette"))
+
+mortsparplacette <- DataArbresMortsClasses %>%
+  group_by(placette) %>% 
+  summarize(across('20':'120',sum))
+  
+mortsparplacette <- mortsparplacette %>% 
+  rowwise(placette) %>% 
+  mutate(Somme = sum(c_across(`20`:`120`))) 
+
+mortsparplacette <-mortsparplacette %>% 
+  left_join(mean_esp_placette, by = join_by("placette" == "Placette"))
+
+colnames(mortsparplacette)[14] <- "biodiv"
+mortsparplacette <- cbind(mortsparplacette,Topo)
+# dans notre tableau mortsparplacettes on a les données sur le nombre moyen d'espèces par placette (biodiv), le nombre d'arbre morts sur cette placette (Somme) et la topographie (Topo)
+
+#tracé du graphique en répartissant les couleurs en fonction de la topographie
+ggbiodiv <- mortsparplacette %>% 
+  ggplot( )+
+  geom_point(aes(x= Somme,y=biodiv,col=Topo))+
+  labs(title = paste("Graphique de la biodiversité en fonction de la quantité de bois mort"))+
+  xlab("Quantité de bois mort")+
+  ylab("Nombre moyen d'espèce par placette")+
+  scale_color_manual(values = c("#e3548c","skyblue", "#ffa600"))
+
+ggsave(filename=here("Results", "graphe_biodiv.pdf"), plot=ggbiodiv)
+
+ggbiodiv
+```
+
+Aucune corrélation ne semble ressortir, en revanche, on remarque qu'en fond de vallée on a beaucoup de bois mort et un faible nombre d'espèces tandis qu'au nord et au sud le nombre d'espèces semble globalement plus important, et la quantité de bois mort plus faible. On peut supposer une corrélation entre le nombre d'espèces et la topographie (cela n'a pas été testé dans cette étude).
+
+#### B - Etude du bois mort en fonction de la topographie
+
+```{r}
+
+#création d'un graphe regroupant les données sur le bois mort en fonction des placettes et de la topographie
+ ggmtot<- DataArbresMortsClasses %>%
+  group_by(placette,Topo) %>% 
+  summarize(across('20':'120',sum)) %>% 
+  pivot_longer(-c(placette,Topo), names_to = "diam", values_to = "nombre") %>% 
+  mutate(diam = factor(diam, levels = diam)) %>% 
+   
+  ggplot() + 
+  geom_col(aes(x= diam,y=nombre,fill=Topo)) +
+  labs(title = paste("Graphe de la circonférence des arbres morts par placette et selon la topographie"))+
+  xlab("Circonférence (cm)")+
+  ylab("Nombre d'arbre morts")+
+  facet_wrap(placette~Topo)+
+  scale_fill_manual(values = c("#e3548c","skyblue", "#ffa600"))
+ggsave(filename=here("Results", paste("graphe_morts.pdf")), plot=ggmtot, height=8, width=13)
+
+
+#création de 3 graphiques en fonction de la topographie
+ggmN <- DataArbresMortsClasses %>%
+  filter(Topo == "N" ) %>% 
+  summarize(across('20':'130',sum)) %>% 
+  pivot_longer(everything(), names_to = "diam", values_to = "nombre") %>% 
+  mutate(diam = factor(diam, levels = diam)) %>% 
+  ggplot() + 
+  geom_col(aes(x= diam,y=nombre),fill="skyblue") +
+  labs(title = paste("Circonférence pour le Nord"))+
+  xlab("Circonférence (cm)")+
+  ylab("Nombre d'arbre")
+
+ggmS <- DataArbresMortsClasses %>%
+  filter(Topo == "S" ) %>% 
+  summarize(across('20':'130',sum)) %>% 
+  pivot_longer(everything(), names_to = "diam", values_to = "nombre") %>% 
+  mutate(diam = factor(diam, levels = diam)) %>% 
+  ggplot() + 
+  geom_col(aes(x= diam,y=nombre),fill="#ffa600") +
+  labs(title = paste("Circonférence pour le Sud"))+
+  xlab("Circonférence (cm)")+
+  ylab("Nombre d'arbres")
+
+ggmFV <- DataArbresMortsClasses %>%
+  filter(Topo == "FV" ) %>% 
+  summarize(across('20':'130',sum)) %>% 
+  pivot_longer(everything(), names_to = "diam", values_to = "nombre") %>% 
+  mutate(diam = factor(diam, levels = diam)) %>% 
+  ggplot() + 
+  geom_col(aes(x= diam,y=nombre),fill="#e3548c") +
+  labs(title = paste("Circonférence pour FV"))+
+  xlab("Circonférence (cm)")+
+  ylab("Nombre d'arbres")
+  
+#association des différents graphes grace à ptachwork
+gg3morts <-ggmN + ggmS + ggmFV +
+  plot_annotation(title = 'Comparaison de la répartition des circonférence du bois mort en fonction de la topographie')
+ggsave(filename=here("Results", "graphe_topo_morts.pdf"), plot=gg3morts)
+
+gg3morts
+
+```
+
+Nous remarquons un effectif de bois mort plus important en fond de vallée (au vu de l'échelle verticale) qu'au nord et au sud. Cela peut s'expliquer par le fait que la forêt soit vieillisante en fond de vallée, d'après les résultats de la partie III - D. De plus, une autre hypothèse pouvant expliquer ce résultat serait la topographie: sur les fortes pentes, le bois mort ne resterait pas sur place et se retrouverait en fond de vallée. Au sud, on retrouve du bois mort avec une circonférence moins large car la forêt est potentiellement plus jeune (cf partie III - D).

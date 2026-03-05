@@ -1,0 +1,2825 @@
+---
+output:
+  pdf_document:
+    includes:
+      before_body: page_de_garde.tex
+      in_header: header.tex
+    number_sections: true
+    toc: true
+    toc_depth: 2
+    latex_engine: pdflatex
+    keep_tex: true
+    highlight: tango
+    df_print: default
+    pandoc_args: ["--wrap=auto",  "--variable=lang:fr"]
+lang: fr
+---
+
+\newpage
+Pour pouvoir tricoter le document :
+```{r}
+knitr::opts_chunk$set(
+  fig.width = 6,       # largeur en pouces (~15.2 cm)
+  fig.height = 4,      # hauteur en pouces
+  fig.align = "center",# centre les graphiques
+  tidy.opts = list(width.cutoff = 70),
+  dev = "cairo_pdf" # necessite que le package cairo soit installe
+)
+```
+
+# Importation des données et des bibliothèques 
+
+Import des bibliothèques utilisées:
+```{r}
+library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(readxl)
+library(openxlsx)
+library(here)
+
+library(AER)
+library(brms)
+library(DescTools)
+library(emmeans)
+library(rstatix)
+
+library(ggplot2)
+library(GGally)
+library(ggpubr)
+library(ggsignif)
+library(patchwork)
+library(viridis)
+library(ggeffects)
+library(gt)
+
+library(FactoMineR)
+library(factoextra)
+```
+
+# Création du plan d'échantillonnage et importation des données
+
+## Création du plan d'échantillonnage
+
+```{r}
+chant = c("Bleu_sans1", "Bleu_sans2", "Bleu_sans3", "Bleu_court1", "Bleu_court2", "Bleu_court3", "Bleu_long1", "Bleu_long2", "Bleu_long3", "Charbo_2notes1", "Charbo_2notes2", "Charbo_2notes3", "Charbo_2notes_inv1", "Charbo_2notes_inv2", "Charbo_2notes_inv3", "Charbo_3notes1", "Charbo_3notes2", "Charbo_3notes3", "Charbo_3notes_inv1", "Charbo_3notes_inv2", "Charbo_3notes_inv3", "Troglo1", "Troglo2", "Troglo3")
+
+plan = matrix(0, nrow=3*24, ncol=4)
+colnames(plan) = c("Mâle 1 (parc)", "Mâle 2 (rue)", "Mâle 3 (sud)", "Mâle 4 (nord)")
+  
+for(i in 1:4) {
+  plan[1:24, i] <- sample(chant)
+  plan[25:48, i] <- sample(chant)
+  plan[49:72, i] <- sample(chant)
+} 
+
+write.xlsx(plan, file = here("output", "Plan_echantillonnage.xlsx"))
+```
+
+## Importation des données
+
+Importation des données conservées dans un data frame.
+```{r}
+data_mesanges <- read_excel(here("data", "TP_mesange_donnees_nettoyees.xlsx"))
+```
+
+Création d’un deuxième data frame à partir des données brutes, qui aura vocation à être ensuite modifié au gré des analyses que l’on souhaitera faire.
+```{r}
+data_mesanges_modifiee <- read_excel(here("data", "TP_mesange_donnees_nettoyees.xlsx"))
+
+data_mesanges_modifiee <- data_mesanges_modifiee %>% mutate(
+  Jour = as.factor(Jour),
+  Son = as.factor(Son),
+  Minute = as.numeric(Minute), 
+  Temperature = as.numeric(Temperature), 
+  Pluie = as.numeric(Pluie), 
+  Ensoleillement = as.numeric(Ensoleillement), 
+  Nombre_passage = as.numeric(Nombre_passage), 
+  Latence_approche_charbo = as.numeric(Latence_approche_charbo), 
+  Latence_chant_charbo = as.numeric(Latence_chant_charbo), 
+  Dist_min_charbo = as.numeric(Dist_min_charbo), 
+  Pre_2 = as.numeric(Pre_2), 
+  Post_2 = as.numeric(Post_2), 
+  Pre_3 = as.numeric(Pre_3), 
+  Post_3 = as.numeric(Post_3), 
+  Latence_approche_bleue = as.numeric(Latence_approche_bleue), 
+  Latence_chant_bleue = as.numeric(Latence_chant_bleue), 
+  Dist_min_bleue = as.numeric(Dist_min_bleue), 
+  Sans_trilles_pre = as.numeric(Sans_trilles_pre), 
+  Sans_trilles_post = as.numeric(Sans_trilles_post), 
+  Court_pre = as.numeric(Court_pre), 
+  Court_post = as.numeric(Court_post), 
+  Long_pre = as.numeric(Long_pre), 
+  Long_post = as.numeric(Long_post))
+```
+
+Il ne sera pas toujours pertinent pour nos analyses séparer les différents types de chants au sein d'une même espèce (comme les chants à deux notes et à trois notes chez la mésange charbonnière).
+
+On modifie donc ce tableau en ajoutant des colonnes contenant pour chacune des diffusions la somme des réponses, soit avant soit après diffusion, pour les deux espèces de mésanges.
+
+Nombre de strophes pré et post diffusion chez la mésange charbonnière
+```{r}
+data_mesanges_modifiee$somme_charbo_pre <- as.numeric(data_mesanges_modifiee$Pre_2) + as.numeric(data_mesanges_modifiee$Pre_3)
+data_mesanges_modifiee$somme_charbo_post<- as.numeric(data_mesanges_modifiee$Post_2) + as.numeric(data_mesanges_modifiee$Post_3)
+```
+
+Nombre de strophes pré et post diffusion chez la mésange bleue
+```{r}
+data_mesanges_modifiee$somme_bleue_pre <-as.numeric(data_mesanges_modifiee$Sans_trilles_pre) + as.numeric(data_mesanges_modifiee$Court_pre) + as.numeric(data_mesanges_modifiee$Long_pre) 
+data_mesanges_modifiee$somme_bleue_post <- as.numeric(data_mesanges_modifiee$Sans_trilles_post) + as.numeric(data_mesanges_modifiee$Court_post) + as.numeric(data_mesanges_modifiee$Long_post)
+```
+
+De même, d'autres colonnes seront nécessaires.
+
+Nombre de strophes totales (c'est-à-dire la somme des strophes pré et post diffusion) chez les deux espèces de mésanges bleue et charbonnière.
+```{r}
+data_mesanges_modifiee$nombre_charbo_total <- data_mesanges_modifiee$somme_charbo_pre + data_mesanges_modifiee$somme_charbo_post
+data_mesanges_modifiee$nombre_bleue_total <- data_mesanges_modifiee$somme_bleue_pre + data_mesanges_modifiee$somme_bleue_post
+```
+
+Nombre de strophes pré et post diffusion chez les deux espèces de mésanges confondues.
+```{r}
+data_mesanges_modifiee$nombre_total_pre <- data_mesanges_modifiee$somme_charbo_pre + data_mesanges_modifiee$somme_bleue_pre
+data_mesanges_modifiee$nombre_total_post <- data_mesanges_modifiee$somme_charbo_post + data_mesanges_modifiee$somme_bleue_post
+```
+
+Nombre de strophes totales (c'est-à-dire la somme des strophes pré et post diffusion) chez les deux espèces de mésanges confondues.
+```{r}
+data_mesanges_modifiee$nombre_total <- data_mesanges_modifiee$nombre_total_pre + data_mesanges_modifiee$nombre_total_post
+```
+
+Ajout de nouvelles variables:
+Création d'une colonne comprenant le temps total d'observation des mésanges.
+Elle a été calculé à partir de la colone minute qui représente les temps converti en minutes (7h45 correspondant au temps 0 de chaque jour). Et donc le temps total d'observations des journées précédentes a été ajouté à chaque journées. Nous avons négligé dans ce calcul les moments où il n'y avait pas d'observations au cours de la journée comme les pauses méridiennes ou encore les moments où on s'est arbité de l'averse. 
+
+```{r}
+data_mesanges_modifiee$temps_total <- as.numeric(data_mesanges_modifiee$Minute)
+data_mesanges_modifiee <- data_mesanges_modifiee %>%
+  mutate(temps_total = as.numeric(Minute) + case_when(
+    Jour == 1 ~ (494 - 2),
+    Jour == 2 ~ (473 - 7) + (494 - 2),
+    Jour == 3 ~ (618 - 363) + (473 - 7) + (494 - 2),
+    Jour == 4 ~ (463 - 83) + (618 - 363) + (473 - 7) + (494 - 2),
+  ))
+```
+
+\newpage
+# Exploration des données – Réalisation d'analyses en composantes principales (ACP)
+
+Sur le terrain, nous avons pu émettre différentes hypothèses, comme nous le verrons par la suite. Cependant, afin de s'assurer que nous n'avions pas oublié de corrélation entre données, nous avons commencé par réalisé différentes ACP afin d'observer ou non, de telles corrélation.
+
+## Création du data.frame pour les ACP
+
+On en transforme les données quantitatives afin qu'elles soient utilisables par la fonction PCA().
+```{r}
+df_PCA <- read_xlsx(here("data", 'TP_mesange_donnees_nettoyees.xlsx'))
+
+df_PCA <- df_PCA %>% mutate(
+  Minute = as.numeric(Minute), 
+  Temperature = as.numeric(Temperature), 
+  Pluie = as.numeric(Pluie), 
+  Ensoleillement = as.numeric(Ensoleillement), 
+  Nombre_passage = as.numeric(Nombre_passage), 
+  Latence_approche_charbo = as.numeric(Latence_approche_charbo) - 60, 
+  Latence_chant_charbo = as.numeric(Latence_chant_charbo) - 60, 
+  Pre_2 = as.numeric(Pre_2), 
+  Post_2 = as.numeric(Post_2), 
+  Pre_3 = as.numeric(Pre_3), 
+  Post_3 = as.numeric(Post_3), 
+  Latence_approche_bleue = as.numeric(Latence_approche_bleue), 
+  Latence_chant_bleue = as.numeric(Latence_chant_bleue),
+  Sans_trilles_pre = as.numeric(Sans_trilles_pre) - 60, 
+  Sans_trilles_post = as.numeric(Sans_trilles_post) - 60, 
+  Court_pre = as.numeric(Court_pre), 
+  Court_post = as.numeric(Court_post), 
+  Long_pre = as.numeric(Long_pre), 
+  Long_post = as.numeric(Long_post))
+```
+
+Puis on le modifie de manière à ce que l'absence de chant ou d'approche d'une mésange corresponde à une latence supérieure à la latence réelle d'observation (on ajoute une seconde à ce temps, le mâle 1 ayant une fois chanté très peu de temps après la fin de l'observation).
+```{r}
+for (i in 1:139) {
+  if (is.na(df_PCA$Latence_approche_charbo[i])) {
+    df_PCA$Latence_approche_charbo[i] = 301
+  }
+  if (is.na(df_PCA$Latence_approche_bleue[i])) {
+    df_PCA$Latence_approche_bleue[i] = 301
+  }
+  if (is.na(df_PCA$Latence_chant_charbo[i])) {
+    df_PCA$Latence_chant_charbo[i] = 301
+  }
+  if (is.na(df_PCA$Latence_chant_bleue[i])) {
+    df_PCA$Latence_chant_bleue[i] = 301
+  }
+}
+```
+
+## Première approche : prise en compte de tous les paramètres
+
+On prend en compte tous les paramètres quantitatifs. Pour ce faire, on met les colonnes non quantitatives en premier pour sélectionner facilement les colonnes quantitatives par la suite.
+```{r}
+explo_PCA_charbo <- df_PCA[, c("Jour", "Male", "Son", "Minute", "Temperature", "Pluie", "Vent", "Ensoleillement", "Nombre_passage", "Latence_approche_charbo", "Latence_chant_charbo", "Pre_2", "Post_2", "Pre_3", "Post_3")]
+
+
+explo_PCA_bleue <- df_PCA[, c("Jour", "Male", "Son", "Minute", "Temperature", "Pluie", "Vent", "Ensoleillement", "Nombre_passage", "Latence_approche_bleue", "Latence_chant_bleue", "Sans_trilles_pre", "Sans_trilles_post", "Court_pre", "Court_post", "Long_pre", "Long_post")]
+
+df_PCA$Somme_pre_charbo <- rowSums(df_PCA[, c("Pre_2", "Pre_3")], na.rm = TRUE)
+df_PCA$Somme_pre_bleue <- rowSums(df_PCA[, c("Sans_trilles_pre", "Court_pre", "Long_pre")], na.rm = TRUE)
+```
+
+Puis on fait une première observation des données.
+```{r}
+explo_PCA_charbo <- PCA(explo_PCA_charbo[, 4:14], scale.unit = TRUE)
+fviz_screeplot(explo_PCA_charbo, ncp =5) + ggtitle("Pourcentage de la variance expliquée par les dimensions, pour l'ACP associant \n variables métérologiques et comportement des mésanges charbonnières") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+explo_PCA_bleue <- PCA(explo_PCA_bleue[, 4:16], scale.unit = TRUE)
+fviz_screeplot(explo_PCA_bleue, ncp =5) + ggtitle("Pourcentage de la variance expliquée par les dimensions, pour l'ACP associant \n variables métérologiques et comportement des mésanges bleues") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+On observe alors que la pluie est correlée positivement au nombre de passages et négativement à l'ensoleillement et à la température. Cela montre bien la réalité du terrain, puisque les jours passant, les conditions métérologiques se sont dégradées.
+De plus, on observe une corrélation négative entre les latences et le nombre de strophes chantées : plus un oiseau arrive tard moins il est susceptible de chanter.
+
+Une fois cette première approche, nous avons cherché à visualiser l'effet de plusieurs facteurs, à savoir les données métérologiques, le chant diffusé ou le jour.
+
+## Deuxième approche, recherche d'un effet des données métérologique.
+
+```{r}
+explo_PCA_meteo <- PCA(df_PCA[, c("Temperature", "Pluie", "Vent", "Ensoleillement")])
+fviz_screeplot(explo_PCA_meteo) + ggtitle("Variance du jeu de données métérologiques")
+fviz_contrib(explo_PCA_meteo, choice = "var", axes = 1) + ggtitle("Participation des variables à la dimension 1 de l'ACP métérologique")
+
+explo_PCA_meteo_charbo <- PCA(df_PCA[, c("Temperature", "Pluie", "Vent", "Ensoleillement", "Somme_pre_charbo")], scale.unit = TRUE)
+fviz_screeplot(explo_PCA_meteo_charbo, ncp =5)  + ggtitle("Variance du jeu de données métérologiques associée aux réponses des mésanges charbonnières") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+fviz_contrib(explo_PCA_meteo_charbo, choice = "var", axes = 1) + ggtitle("Participation des variables à la dimension 1 de l'ACP associant \n données météorologiques et réponses des mésanges charbonnières") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+explo_PCA_meteo_bleue <- PCA(df_PCA[, c("Temperature", "Pluie", "Vent", "Ensoleillement", "Somme_pre_bleue")], scale.unit = TRUE)
+fviz_screeplot(explo_PCA_meteo_bleue, ncp =5) + ggtitle("Variance du jeu de données métérologiques associée aux réponses des mésanges bleues") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+fviz_contrib(explo_PCA_meteo_bleue, choice = "var", axes = 1) + ggtitle("Participation des variables à la dimension 1 de l'ACP associant \n données météorologiques et réponses des mésanges bleues") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+Sur ces graphiques, on observe une anti-corrélation entre la somme des chants et la pluviométrie, plus marquée pour les mésanges bleues que pour les charbonnières.
+L'effet de la pluie sur le nombre de strophes chantés sera testé par la suite.
+
+## Troisième approche, recherche d'un effet de variable qualitative
+Dans un premier temps, l'analyse comportementale a utilisé le jeu de donné au sein duquel les mésanges n'ayant pas été vu et/ou entendues présentent des latences respectives de 301 secondes. En effet, le nombre de données était très faible si l'on enlevait ces données.
+Dans un second temps, un analyse comportementale des charbonnières a été tentée en enlevant les lignes où des données étaient manquantes afin d'étudier des corrélations uniquement entre des données observées.
+
+### Création des PCA
+
+```{r}
+df_comp_charbo <- df_PCA[, c("Jour", "Son", "Latence_approche_charbo", "Latence_chant_charbo", "Pre_2", "Post_2", "Pre_3", "Post_3")]
+
+df_comp_charbo$Jour <- as.factor(df_comp_charbo$Jour)
+df_comp_charbo$Son <- as.factor(df_comp_charbo$Son)
+
+PCA_comp_charbo <- PCA(df_comp_charbo[, 3:8], scale.unit = TRUE)
+
+fviz_screeplot(PCA_comp_charbo, ncp = 5) + ggtitle("Sources de variance au sein du comportement \n des mésanges charbonnières")
+
+fviz_contrib(PCA_comp_charbo, choice = "var", axes = 1) + ggtitle("Contribution des variables à la dimension 1 de l'ACP portant sur le comportement \n des mésanges charbonnières") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_contrib(PCA_comp_charbo, choice = "var", axes = 2) + ggtitle("Contribution des variables à la dimension 2 de l'ACP portant sur le comportement des mésanges charbonnières") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_contrib(PCA_comp_charbo, choice = "var", axes = 3) + ggtitle("Contribution des variables à la dimension 3 de l'ACP portant sur le comportement \n des mésanges charbonnières") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_contrib(PCA_comp_charbo, choice = "var", axes = 4) + ggtitle("Contribution des variables à la dimension 4 de l'ACP portant sur le comportement \n des mésanges charbonnières") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+Les 4 premières dimensions expliquent la majorité de la variabilité du jeu de données. De plus, certaines dimensions forment des groupes cohérents (ici, la dimension une est formée par l'ensemble des variables liées à la réaction des mésanges, à savoir les latences et le nombre de strophes chantées après diffusion).
+
+```{r}
+df_comp_bleue <- df_PCA[, c("Jour", "Son", "Latence_approche_bleue", "Latence_chant_bleue", "Sans_trilles_pre", "Sans_trilles_post", "Court_pre", "Court_post", "Long_pre", "Long_post")]
+
+df_comp_bleue$Jour <- as.factor(df_comp_bleue$Jour)
+df_comp_bleue$Son <- as.factor(df_comp_bleue$Son)
+
+PCA_comp_bleue <- PCA(df_comp_bleue[, 3:10], scale.unit = TRUE)
+
+fviz_screeplot(PCA_comp_bleue, ncp = 10)+ ggtitle("Sources de variance au sein du comportement \n des mésanges bleues")
+
+fviz_contrib(PCA_comp_bleue, choice = "var", axes = 1) + ggtitle("Contribution des variables à la dimension 1 de l'ACP portant sur le comportement \n des mésanges bleues") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_contrib(PCA_comp_bleue, choice = "var", axes = 2) + ggtitle("Contribution des variables à la dimension 2 de l'ACP portant sur le comportement \n des mésanges bleues") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_contrib(PCA_comp_bleue, choice = "var", axes = 3) + ggtitle("Contribution des variables à la dimension 3 de l'ACP portant sur le comportement\n des mésanges bleues") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_contrib(PCA_comp_bleue, choice = "var", axes = 4) + ggtitle("Contribution des variables à la dimension 4 de l'ACP portant sur le comportement \n des mésanges bleues") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+Une fois de plus, les quatre premières dimensions expliquent la majorité de la variabilité du jeu de données. Cependant, cette fois-ci, il est difficile de faire des liens entre les variables explicatives d'une dimension.
+
+### Recherche d'un effet du chant
+
+On différencie les points en fonction du chant ayant été diffusé.
+```{r}
+fviz_pca_ind(PCA_comp_charbo,
+             axes = c(1, 2),
+             geom = "point",
+             habillage = df_comp_charbo$Son,
+             palette = c("#98F5FF", "#53868B", "#6495ED", "#FFB90F","#CD950C", "#FFD700", "#8B7500", "#8B4513"),
+             addEllipses = TRUE,
+             mean.point = FALSE) + 
+  ggtitle("ACP des variables représentant la réponse des mésanges charbonnières,\n coloriées en fonction du chant diffusé") + 
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_pca_ind(PCA_comp_charbo,
+             axes = c(2, 3),
+             geom = "point",
+             habillage = df_comp_charbo$Son,
+             palette = c("#98F5FF", "#53868B", "#6495ED", "#FFB90F","#CD950C", "#FFD700", "#8B7500", "#8B4513"),
+             addEllipses = TRUE,
+             mean.point = FALSE) +
+   ggtitle("ACP des variables représentant la réponse des mésanges charbonnières,\n coloriées en fonction du chant diffusé") + 
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_pca_ind(PCA_comp_charbo,
+             axes = c(3, 4),
+             geom = "point",
+             habillage = df_comp_charbo$Son,
+             palette = c("#98F5FF", "#53868B", "#6495ED", "#FFB90F","#CD950C", "#FFD700", "#8B7500", "#8B4513"),
+             addEllipses = TRUE,
+             mean.point = FALSE) +
+   ggtitle("ACP des variables représentant la réponse des mésanges charbonnières,\n coloriées en fonction du chant diffusé") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+On n'observe pas de regroupement de données disctincts des autres. Ainsi, pour les mésanges charbonnières, il ne semble pas y avoir de différence de réactions en fonction du type de chant diffusé.
+
+```{r}
+fviz_pca_ind(PCA_comp_bleue,
+             axes = c(1, 2),
+             geom = "point",
+             habillage = df_comp_bleue$Son,
+             palette = c("#98F5FF", "#53868B", "#6495ED", "#FFB90F","#CD950C", "#FFD700", "#8B7500", "#8B4513"),
+             addEllipses = TRUE,
+             mean.point = FALSE) + 
+  ggtitle("ACP des variables représentant la réponse des mésanges bleues,\n coloriées en fonction du chant diffusé") + 
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_pca_ind(PCA_comp_bleue,
+             axes = c(2, 3),
+             geom = "point",
+             habillage = df_comp_bleue$Son,
+             palette = c("#98F5FF", "#53868B", "#6495ED", "#FFB90F","#CD950C", "#FFD700", "#8B7500", "#8B4513"),
+             addEllipses = TRUE,
+             mean.point = FALSE) +
+   ggtitle("ACP des variables représentant la réponse des mésanges bleues,\n coloriées en fonction du chant diffusé") + 
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_pca_ind(PCA_comp_bleue,
+             axes = c(3, 4),
+             geom = "point",
+             habillage = df_comp_bleue$Son,
+             palette = c("#98F5FF", "#53868B", "#6495ED", "#FFB90F","#CD950C", "#FFD700", "#8B7500", "#8B4513"),
+             addEllipses = TRUE,
+             mean.point = FALSE) +
+   ggtitle("ACP des variables représentant la réponse des mésanges bleues,\n coloriées en fonction du chant diffusé") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+De même, on n'observe pas de regroupement de données disctincts des autres. Il ne semble donc pas y avoir de différence de réactions en fonction du type de chant diffusé.
+
+### Recherche d'un effet du jour
+
+On différencie les points en fonction du jour de diffusion.
+```{r}
+fviz_pca_ind(PCA_comp_charbo,
+             axes = c(1, 2),
+             geom = "point",
+             habillage = df_comp_charbo$Jour,
+             palette = c("#00CD00", "hotpink2", "#EE2C2C", "#00BFFF"),
+             addEllipses = TRUE,
+             mean.point = FALSE) +
+   ggtitle("ACP des variables représentant la réponse des mésanges charbonnières,\n coloriées en fonction du jour de diffusion") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_pca_ind(PCA_comp_charbo,
+             axes = c(2, 3),
+             geom = "point",
+             habillage = df_comp_charbo$Jour,
+             palette = c("#00CD00", "hotpink2", "#EE2C2C", "#00BFFF"),
+             addEllipses = TRUE,
+             mean.point = FALSE) +
+   ggtitle("ACP des variables représentant la réponse des mésanges charbonnières,\n coloriées en fonction du jour de diffusion") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_pca_ind(PCA_comp_charbo,
+             axes = c(3, 4),
+             geom = "point",
+             habillage = df_comp_charbo$Jour,
+             palette = c("#00CD00", "hotpink2", "#EE2C2C", "#00BFFF"),
+             addEllipses = TRUE,
+             mean.point = FALSE) +
+   ggtitle("ACP des variables représentant la réponse des mésanges charbonnières,\n coloriées en fonction du jour de diffusion") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+```
+Encore une fois, on n'observe pas de regroupement de données disctincts des autres. Il ne semble donc pas y avoir de différence de réactions en fonction du jour de diffusion.
+
+```{r}
+
+fviz_pca_ind(PCA_comp_bleue,
+             axes = c(1, 2),
+             geom = "point",
+             habillage = df_comp_bleue$Jour,
+             palette = c("#00CD00", "hotpink2", "#EE2C2C", "#00BFFF"),
+             addEllipses = TRUE,
+             mean.point = FALSE) +
+   ggtitle("ACP des variables représentant la réponse des mésanges bleues,\n coloriées en fonction du jour de diffusion") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_pca_ind(PCA_comp_bleue,
+             axes = c(2, 3),
+             geom = "point",
+             habillage = df_comp_bleue$Jour,
+             palette = c("#00CD00", "hotpink2", "#EE2C2C", "#00BFFF"),
+             addEllipses = TRUE,
+             mean.point = FALSE) +
+   ggtitle("ACP des variables représentant la réponse des mésanges bleues,\n coloriées en fonction du jour de diffusion") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_pca_ind(PCA_comp_bleue,
+             axes = c(3, 4),
+             geom = "point",
+             habillage = df_comp_bleue$Jour,
+             palette = c("#00CD00", "hotpink2", "#EE2C2C", "#00BFFF"),
+             addEllipses = TRUE,
+             mean.point = FALSE) +
+   ggtitle("ACP des variables représentant la réponse des mésanges bleues,\n coloriées en fonction du jour de diffusion") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+Une fois de plus, il n'y a pas de regroupement de données disctincts des autres. Ainsi, il ne semble pas y avoir de différence de réactions en fonction du jour de diffusion.
+
+### Analyse des données complètes
+Les mêmes étapes sont effectuées, mais uniquement pour les mésanges charbonnières pour lesquelles toutes les données ont été obtenues.
+
+Les données doivent être ré-importées car le data.frame df_PCA ne présente plus de lignes contenant "NA", celles-ci ayant été modifiées.
+
+```{r}
+df_PCA_NA <- read_xlsx(here("data", 'TP_mesange_donnees_nettoyees.xlsx'))
+
+df_PCA_NA <- df_PCA_NA %>% mutate(
+  Jour = as.factor(Jour),
+  Son = as.factor(Son),
+  Minute = as.numeric(Minute), 
+  Temperature = as.numeric(Temperature), 
+  Pluie = as.numeric(Pluie), 
+  Ensoleillement = as.numeric(Ensoleillement), 
+  Nombre_passage = as.numeric(Nombre_passage), 
+  Latence_approche_charbo = as.numeric(Latence_approche_charbo), 
+  Latence_chant_charbo = as.numeric(Latence_chant_charbo), 
+  Dist_min_charbo = as.numeric(Dist_min_charbo), 
+  Pre_2 = as.numeric(Pre_2), 
+  Post_2 = as.numeric(Post_2), 
+  Pre_3 = as.numeric(Pre_3), 
+  Post_3 = as.numeric(Post_3), 
+  Latence_approche_bleue = as.numeric(Latence_approche_bleue), 
+  Latence_chant_bleue = as.numeric(Latence_chant_bleue), 
+  Dist_min_bleue = as.numeric(Dist_min_bleue), 
+  Sans_trilles_pre = as.numeric(Sans_trilles_pre), 
+  Sans_trilles_post = as.numeric(Sans_trilles_post), 
+  Court_pre = as.numeric(Court_pre), 
+  Court_post = as.numeric(Court_post), 
+  Long_pre = as.numeric(Long_pre), 
+  Long_post = as.numeric(Long_post))
+
+df_comp_charbo_NA <- na.omit(df_PCA[, c("Jour", "Son", "Latence_approche_charbo", "Latence_chant_charbo", "Pre_2", "Post_2", "Pre_3", "Post_3")])
+
+df_comp_charbo_NA$Jour <- as.factor(df_comp_charbo_NA$Jour)
+df_comp_charbo_NA$Son <- as.factor(df_comp_charbo_NA$Son)
+
+PCA_comp_charbo_NA <- PCA(df_comp_charbo_NA[, 3:8], scale.unit = TRUE)
+
+fviz_screeplot(PCA_comp_charbo_NA, ncp = 5) + ggtitle("Sources de variances au sein du comportement des mésanges charbonnières,\n pour les observations complètes") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_contrib(PCA_comp_charbo_NA, choice = "var", axes = 1) + ggtitle("Contribution des variables à la dimension 1 de l'ACP portant sur le comportement\n des mésanges charbonnières, pour les observations complètes") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_contrib(PCA_comp_charbo_NA, choice = "var", axes = 2) + ggtitle("Contribution des variables à la dimension 2 de l'ACP portant sur le comportement\n des mésanges charbonnières, \n pour les observations complètes") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_contrib(PCA_comp_charbo_NA, choice = "var", axes = 3)  + ggtitle("Contribution des variables à la dimension 3 de l'ACP portant sur le comportement\n des mésanges charbonnières, \n pour les observations complètes") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_contrib(PCA_comp_charbo_NA, choice = "var", axes = 4) + ggtitle("Contribution des variables à la dimension 4 de l'ACP portant sur le comportement\n des mésanges charbonnières, \n pour les observations complètes") + theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+```
+
+Différenciation en fonction du chant diffusé.
+```{r}
+fviz_pca_ind(PCA_comp_charbo_NA,
+             axes = c(1, 2),
+             geom = "point",
+             habillage = df_comp_charbo_NA$Son,
+             palette = c("#98F5FF", "#53868B", "#6495ED", "#FFB90F","#CD950C", "#FFD700", "#8B7500", "#8B4513"),
+             mean.point = FALSE) + 
+  ggtitle("ACP des variables représentant la réponse des mésanges charbonnières, \n pour les observations complètes, coloriées en fonction du chant diffusé") + 
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_pca_ind(PCA_comp_charbo_NA,
+             axes = c(2, 3),
+             geom = "point",
+             habillage = df_comp_charbo_NA$Son,
+             palette = c("#98F5FF", "#53868B", "#6495ED", "#FFB90F","#CD950C", "#FFD700", "#8B7500", "#8B4513"),
+             mean.point = FALSE) + 
+  ggtitle("ACP des variables représentant la réponse des mésanges charbonnières, \n pour les observations complètes, coloriées en fonction du chant diffusé") + 
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_pca_ind(PCA_comp_charbo_NA,
+             axes = c(3, 4),
+             geom = "point",
+             habillage = df_comp_charbo_NA$Son,
+             palette = c("#98F5FF", "#53868B", "#6495ED", "#FFB90F","#CD950C", "#FFD700", "#8B7500", "#8B4513"),
+             mean.point = FALSE) + 
+  ggtitle("ACP des variables représentant la réponse des mésanges charbonnières, \n pour les observations complètes, coloriées en fonction du chant diffusé") + 
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+```
+Les données sont trop éparses pour tracer des ellipses, mais aucun groupe ne sort clairement. On peut estimer qu'il n'y a pas de variation en fonction du chant diffusé.
+
+```{r}
+fviz_pca_ind(PCA_comp_charbo_NA,
+             axes = c(1, 2),
+             geom = "point",
+             habillage = df_comp_charbo_NA$Jour,
+             palette = c("#00CD00", "hotpink2", "#EE2C2C", "#00BFFF"),
+             addEllipses = TRUE,
+             mean.point = FALSE) + 
+  ggtitle("ACP des variables représentant la réponse des mésanges charbonnières, \n pour les observations complètes, coloriées en fonction du jour de diffusion") + 
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_pca_ind(PCA_comp_charbo_NA,
+             axes = c(2, 3),
+             geom = "point",
+             habillage = df_comp_charbo_NA$Jour,
+             palette = c("#00CD00", "hotpink2", "#EE2C2C", "#00BFFF"),
+             addEllipses = TRUE,
+             mean.point = FALSE) + 
+  ggtitle("ACP des variables représentant la réponse des mésanges charbonnières, \n pour les observations complètes, coloriées en fonction du jour de diffusion") + 
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+fviz_pca_ind(PCA_comp_charbo_NA,
+             axes = c(3, 4),
+             geom = "point",
+             habillage = df_comp_charbo_NA$Jour,
+             palette = c("#00CD00", "hotpink2", "#EE2C2C", "#00BFFF"),
+             addEllipses = TRUE,
+             mean.point = FALSE) + 
+  ggtitle("ACP des variables représentant la réponse des mésanges charbonnières, \n pour les observations complètes, coloriées en fonction du jour de diffusion") + 
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+Cette fois, les données permettent de tracer des ellipses (les groupes étant moins nombreux), mais aucun groupe ne sort clairement. Comme pour les données prenant en compte les lignes contenant des "NA", il n'y a pas d'effet du jour de diffusion.
+
+\newpage
+# Étude de l’impact des différents paramètres météorologiques sur la réponse comportementale des mésanges
+
+Sur le terrain, on a observé qu'il était plus difficile de repérer et d'entendre les oiseaux lorsqu'il pleuvait.Il semblait également il y avoir moins de réponse quand il pleuvait ou qu'il y avait du vent. Nous nous sommes donc demandés si les conditions météorologiques pouvaient modifier la réponse comportementale des mésanges à leur propre chant.
+
+## Pluie
+On souhaite d'abord représenter les données. On va donc tracer l'évolution du nombre de chant avant et après diffusion pour les mésanges bleues et charbonnières.
+
+Pour savoir s'il y a un effet global de la pluie sur les deux espèces de mésanges on va s'aider des variables qui comptabilisent lors de chaque observation le nombre de strophes post et pre diffusion de mésanges bleues ou de mésanges charbonnières que nous avons pu entendre. 
+
+On peut commencer par représenter nos données graphiquement afin d'avoir une idée de l'effet de la pluie sur le nombre de strophes totales émises par les mésanges.
+
+Pour différencier la réponse des mésanges charbonnières et des mésanges bleues avant diffusion en fonction des précipitations on crée un nouveau tableau qui donne une étiquette "Charbo" ou "Bleue" à la réponse des mésanges selon leur espèce.
+```{r}
+data_mesanges_espece <- data.frame(Pluie = data_mesanges_modifiee$Pluie,
+                                   Charbo = data_mesanges_modifiee$somme_charbo_pre,
+                                   Bleue = data_mesanges_modifiee$somme_bleue_pre)
+data_mesanges_espece <-  pivot_longer(data_mesanges_espece,cols=c(Charbo,Bleue))
+colnames(data_mesanges_espece) <- c("Pluie","Espece","Nombre")
+```
+
+On peut ensuite tracer le nombre de réponses des mésanges avant diffusion, en différenciant leur espèce grâce au tableau précédent.
+```{r}
+ggplot(data = data_mesanges_espece, aes(Pluie, Nombre, colour=Espece)) +
+  geom_boxplot() +
+  ylab("Nombre de Strophes avant diffusion") +
+  xlab("Précipitations en mm/h") +
+  scale_colour_manual(values = c("Bleue" = "steelblue", "Charbo" = "gold"))
+```
+
+Pour différencier la réponse des mésanges charbonnières et des mésanges bleues après diffusion en fonction des précipitations on crée un nouveau tableau qui donne une étiquette "Charbo" ou "Bleue" à la réponse des mésanges selon leur espèce.
+```{r}
+data_mesanges_espece2 <- data.frame(Pluie = data_mesanges_modifiee$Pluie,
+                                   Charbo = data_mesanges_modifiee$somme_charbo_post,
+                                   Bleue = data_mesanges_modifiee$somme_bleue_post,
+                                   Vu_charbo = data_mesanges_modifiee$Vu_charbo,
+                                   Vu_bleue = data_mesanges_modifiee$Vu_bleue)
+data_mesanges_espece2 <- pivot_longer(data_mesanges_espece2, cols=c(Charbo, Bleue), names_to="Espece", values_to="Nombre")
+```
+
+On peut ensuite tracer le nombre de réponses des mésanges après diffusion, en différenciant leur espèce grâce au tableau précédent.
+```{r}
+ggplot(data = data_mesanges_espece2, aes(Pluie, Nombre, colour=Espece)) +
+  geom_boxplot()+
+  ylab("Nombre de Strophes après diffusion") +
+  xlab("Précipitations en mm/h") +
+  scale_colour_manual(values = c("Bleue" = "steelblue", "Charbo" = "gold"))
+```
+
+On va ensuite faire des tests statistiques non paramétriques (test de Kruskal-Wallis) pour voir si la pluie diminue significativement la réponse des mésanges.
+```{r}
+kruskal.test(somme_charbo_pre ~ Pluie,data_mesanges_modifiee)
+```
+On conserve l'hypothèse d'absence d'effet de la pluie sur le chant des mésanges charbonnières avant diffusion.
+
+```{r}
+kruskal.test(somme_charbo_post ~ Pluie,data_mesanges_modifiee)
+```
+On conserve l'hypothèse d'absence d'effet de la pluie sur le chant des mésanges charbonnières après diffusion.
+
+```{r}
+kruskal.test(somme_bleue_pre ~ Pluie,data_mesanges_modifiee)
+```
+On conserve l'hypothèse d'absence d'effet de la pluie sur le chant des mésanges bleues avant diffusion.
+
+```{r}
+kruskal.test(somme_bleue_post ~ Pluie,data_mesanges_modifiee)
+```
+On conserve l'hypothèse d'absence d'effet de la pluie sur le chant des mésanges bleues après diffusion.
+
+Pour aller plus loin, il est possible d'utiliser des modèles linéaires généralisés.
+```{r}
+modele_pluie <- glm(nombre_total ~ Pluie, data = data_mesanges_modifiee, family = poisson)
+summary(modele_pluie)
+DescTools::PseudoR2(modele_pluie, which = "all")
+```
+Il existe un effet significatif de la pluie sur le nombre de strophes. Certaines catégories de pluie (comme 0.05) sont associées à une augmentation significative du chant. D'autres (comme 0.15, 0.3, 0.6) entraînent une diminution significative du nombre de strophes. Certaines catégories n’ont pas d’effet significatif, peut-être à cause du peu de données (ex : 0.5, 0.8)
+
+On peut ensuite modéliser les prédictions de chants associés à chaque catégorie de pluviométrie en utilisant le modèle linéaire généralisé:
+```{r}
+data_mesanges_modifiee$Pluie_cat <- as.factor(data_mesanges_modifiee$Pluie)
+# Nouveau dataframe avec chaque niveau de pluie
+niveaux_pluie <- data.frame(Pluie = unique(data_mesanges_modifiee$Pluie))
+
+# Prédictions du modèle pour chaque niveau
+niveaux_pluie$pred <- predict(modele_pluie, newdata = niveaux_pluie, type = "response")
+
+ggplot(data_mesanges_modifiee, aes(x = Pluie, y = nombre_total, color = "Données observées")) +
+  geom_jitter(width = 0.2, alpha = 0.4, show.legend = TRUE) +
+  geom_point(data = niveaux_pluie, aes(x = Pluie, y = pred, color = "Prédictions"), size = 3, show.legend = TRUE) +
+  ggtitle("Prédictions du modèle par catégorie de pluie") +
+  xlab("Précipitations en mm/h") +
+  ylab("Nombre de strophes") +
+  scale_color_manual( name = "Type de points", values = c("Données observées" = "black", "Prédictions" = "red"))
+mod_cat <- glm(nombre_total ~ as.factor(Pluie), data = data_mesanges_modifiee, family = quasipoisson)
+```
+
+On teste désormais, l'effet de la pluie sur la détection visuelle des mésanges.
+
+Objectif : Pour chaque niveau de pluie, quelle est la proportion d'observations de mésanges (charbonnières ou bleues) ?
+On veut  représenter la fréquence d'observation des mésanges (vu_charbo ou vu_bleue) relativement au nombre de cas par catégorie de pluie.
+
+```{r}
+# On part du tableau initial
+data_freq_vue <- data_mesanges_modifiee %>%
+  mutate(Total_obs = 1) %>%
+  group_by(Pluie) %>%
+  summarise(
+    n_obs = n(),                      # total de lignes par niveau de pluie
+    vues_charbo = sum(Vu_charbo),
+    vues_bleue = sum(Vu_bleue)
+  ) %>%
+  mutate(
+    freq_charbo = vues_charbo / n_obs,
+    freq_bleue = vues_bleue / n_obs
+  )
+
+# Passage en long format pour ajouter des étiquettes d'espèces
+data_freq_vue_long <- data_freq_vue %>%
+  pivot_longer(cols = c(freq_charbo, freq_bleue),
+               names_to = "Espece",
+               values_to = "Frequence") %>%
+  mutate(Espece = dplyr::recode(Espece,
+                                "freq_charbo" = "Charbo",
+                                "freq_bleue" = "Bleue"))
+
+```
+
+```{r}
+ggplot(data_freq_vue_long, aes(x = Pluie, y = Frequence, fill = Espece)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("Bleue" = "steelblue", "Charbo" = "gold")) +
+  ylab("Fréquence moyenne de vue par observation") +
+  xlab("Précipitations en mm/h") +
+  ggtitle("Fréquence relative d'observation des mésanges selon la pluie")
+
+```
+```{r}
+kruskal.test(Frequence~Pluie, data_freq_vue_long)
+```
+
+**Conclusion :** la proportion d'observation des mésanges ne varie pas significativement avec la pluie, l'impression sur le terrain était donc fausse.
+
+## Ensoleillement
+
+On repésente les données pour faire apparaître des tendances.
+```{r}
+data_mesanges_modifiee |> 
+  mutate(Jour = factor(Jour, levels = unique(Jour))) |> 
+  ggplot(mapping = aes(x=Minute, y=Ensoleillement, colour=Jour)) +
+  geom_point() +
+  xlab("Temps dans une journée en min") +
+  ylab("Ensoleillement en Watt par mètre carré") +
+  ggtitle("Evolution des radiations solaires mesurées en fonction du jour\n et au sein d'une journée")
+```
+Cela confirme le ressenti de terrain avec très peu de soleil passé le jour 1...
+
+On représente maintenant l'évolution du chant des mésanges bleues (pre) et (post) en fonction de l'ensoleillement.
+```{r}
+data_mesanges_modifiee |> 
+  mutate(Jour = factor(Jour, levels = unique(Jour))) |> 
+ggplot(
+  data= data_mesanges_modifiee,
+  mapping = aes(Ensoleillement, somme_bleue_pre , color = as.factor(Jour)
+)) +
+  geom_point() +
+  xlab("Ensoleillement") +
+  ylab("Nombre de réponse des mésanges\n bleues avant diffusion") +
+  ggtitle("Evolution du chant des mesanges bleues\n avant diffusion en fonction de l'ensoleillement ") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+
+```{r}
+ggplot(
+  data= data_mesanges_modifiee,
+  mapping = aes(x= Ensoleillement, y= somme_bleue_post, color = as.factor(Jour))
+) +
+  geom_point() +
+  xlab("Ensoleillement") +
+  ylab("Nombre de réponse des mésanges bleues\n après diffusion") +
+  ggtitle("Evolution du chant des mesanges bleues\n après diffusion en fonction de l'ensoleillement ") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+
+On représente aussi l'évolution du chant des mesanges charbonnières (pre) et (post) en fonction de l'ensoleillement.
+```{r}
+ggplot(
+  data= data_mesanges_modifiee,
+  mapping = aes(x= Ensoleillement, y= somme_charbo_pre, color = as.factor(Jour))
+) +
+  geom_point() +
+  xlab("Ensoleillement") +
+  ylab("Nombre de réponse des mésanges charbonnières\n avant diffusion") +
+  ggtitle("Evolution du chant des mesanges charbonnières\n avant diffusion en fonction de l'ensoleillement ") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+
+```{r}
+ggplot(
+  data= data_mesanges_modifiee,
+  mapping = aes(x= Ensoleillement, y= somme_charbo_post, color = as.factor(Jour))
+) +
+  geom_point() +
+  xlab("Ensoleillement") +
+  ylab("Nombre de réponse des mésanges charbonnières\n après diffusion") +
+  ggtitle("Evolution du chant des mesanges charbonnières\n après diffusion en fonction de l'ensoleillement ") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+Pour toutes ces représentations, on pourrait avoir l'impression qu'il y a une corrélation négative entre l'ensoleillement et le nombre de réponses.
+
+On réalise ensuite des tests statistiques non paramétriques pour voir si l'ensoleillement diminue significativement le nombre de chants des mésanges.
+```{r}
+kruskal.test(somme_charbo_pre~Ensoleillement , data_mesanges_modifiee)
+```
+On conserve l'hypothèse d'absence d'effet du soleil sur le chant des mésanges charbonnières avant diffusion.
+
+```{r}
+kruskal.test(somme_charbo_post~Ensoleillement , data_mesanges_modifiee)
+```
+On conserve l'hypothèse d'absence d'effet du soleil sur le chant des mésanges charbonnières après diffusion.
+
+```{r}
+kruskal.test(somme_bleue_pre~Ensoleillement , data_mesanges_modifiee)
+```
+On conserve l'hypothèse d'absence d'effet du soleil sur le chant des mésanges bleue avant diffusion.
+
+```{r}
+kruskal.test(somme_bleue_post~Ensoleillement , data_mesanges_modifiee)
+```
+On conserve l'hypothèse d'absence d'effet du soleil sur le chant des mésanges bleue après diffusion.
+
+**Conclusion :** Il n'y a pas d'effet de l'ensoleillement sur le chant des mésanges avant et après diffusion.
+
+## Température
+
+On peut se demander si les conditions environnementales affectent de manière différenciée les deux espèces de mésanges. Pour répondre à cette question, nous avons donc créé un nouveau data frame.
+```{r}
+data_mesanges_espece_VT <- data.frame(Vent=data_mesanges_modifiee$Vent,
+                                   Temperature = data_mesanges_modifiee$Temperature,
+                                   Charbo = data_mesanges_modifiee$nombre_charbo_total,
+                                   Bleue = data_mesanges_modifiee$nombre_bleue_total)
+
+data_mesanges_espece_VT <-pivot_longer(data_mesanges_espece_VT,
+                                    cols = c(Charbo,Bleue))
+```
+
+Puis, nous avons tracé un graphique représentant l'influence de la température sur le chant des mésanges selon l'espèce. Nous avons pris en compte les chants avant et après diffusion.
+```{r}
+data_mesanges_espece_VT$Temperature <- as.numeric(data_mesanges_espece_VT$Temperature)
+graph_temperature_espece <- ggplot(data = data_mesanges_espece_VT, 
+                                 aes(x = Temperature, 
+                                     y = value, color=name)) +
+  geom_point() +
+  xlab("Temperature en °C") +
+  ylab("Nombre de strophes pendant\n les 6 minutes d'observations") +
+  ggtitle("Influence de la température sur le chant\n des oiseaux pendant les 6 minutes d'observations")  +
+  theme(plot.title = element_text(size = 10, hjust = 0.5)) +
+  scale_color_manual(values = c("Charbo" = "gold", "Bleue" = "steelblue"),  # couleurs
+    name = "Espèce de mésange",
+    labels = c("Strophe_charbo" = "Charbonnière", "Strophe_bleue" = "Bleue") # titre de la légende
+  )
+
+graph_temperature_espece
+```
+Pour savoir si il y a un effet global de la température sur les deux espèces de mésanges on va s'aider de la variable nombre de strophes totales qui comptabilise lors de chaque observation le nombre de strophes de mésanges bleues et charbonnières que nous avons pu entendre. 
+
+On peut commencer par représenter nos données graphiquement afin d'avoir une idée de l'effet de la température sur le nombre de strophes totales émises par les mésanges.
+```{r}
+graph_temperature <- ggplot(data = data_mesanges_modifiee, 
+                     aes(x = Temperature, 
+                         y = nombre_total))+
+  geom_point() +
+  xlab("Temperature en °C") +
+  ylab("Nombre de strophes émises par les mésanges\n lors d'une session d'observation de 6 minutes") +
+  ggtitle("Influence de la température sur le chant des oiseaux\n suite à la diffusion")
+graph_temperature
+```
+
+On souhaite maintenant tester s'il y a une influence significative de la température sur le nombre de strophes émises par les mésanges. Pour cela, on réalise un test de corrélation:
+
+Utilisation du test de Kendall: il s'agit d'une méthode non paramétrique pour mesurer la force et la direction de la relation monotone entre deux variables continues.
+```{r}
+cor.test(as.numeric(data_mesanges_modifiee$Temperature), 
+         as.numeric(data_mesanges_modifiee$nombre_total), 
+         method = "kendall")
+```
+Il n'y a donc pas de relation monotone significative entre le nombre de strophes émises par les mésanges et la température. 
+
+Pour aller plus loin, il est possible d'utiliser des modèles linéaires généralisés.
+```{r}
+modele_temperature <- glm(nombre_total ~ Temperature, data = data_mesanges_modifiee, family = poisson)
+summary(modele_temperature)
+DescTools::PseudoR2(modele_temperature, which = "all")
+
+```
+```{r}
+data_mesanges_modifiee$Temperature <- as.numeric(as.character(data_mesanges_modifiee$Temperature))
+graph_temperature_modele <- ggplot(data = data_mesanges_modifiee, 
+                                   aes(x = Temperature, 
+                                       y = nombre_total, color = Temperature)) +
+  scale_color_viridis() +
+  geom_point() +
+  xlab("Température en °C") +
+  ylab("Nombre de strophes émises par les mésanges lors d'une session d'observation de 6 minutes") +
+  ggtitle("Influence de la température sur le chant des oiseaux") +  
+  geom_smooth(method = "glm", method.args = list(family = "quasipoisson"), se = TRUE, col = "blue")
+
+print(graph_temperature_modele)
+```
+
+## Vent
+On réutilise le data frame data_mesanges_espece_VT qui permet de séparer les espèces sur la représentation graphique.
+
+Graphique représentant l'influence du vent sur le chant des mésanges en fonction de l'espèce.
+```{r}
+graph_vent_post_espece <- ggplot(data = data_mesanges_espece_VT, 
+                          aes(x = Vent, 
+                              y = value, color=name)) +
+  geom_point() +
+  xlab("Vitesse du Vent en km/h") +
+  ylab("Nombre de strophes pendant\n les 6 minutes d'observations") +
+  ggtitle("Influence du vent sur le chant des oiseaux\n pendant les 6 minutes d'observations") +
+  scale_color_manual(
+    values = c("Charbo" = "gold", "Bleue" = "steelblue"),  # couleurs
+    name = "Espèce de mésange",labels = c("Charbo" = "Charbonnière", "Bleue" = "Bleue") # titres de la légende
+  )
+graph_vent_post_espece
+```
+Pour savoir s'il y a un effet globale du vent sur les deux espèces de mésanges on va s'aider de la variable qui comptabilise lors de chaque observation le nombre total de strophes de mésanges bleues et charbonnières que nous avons pu entendre. 
+
+On peut commencer par représenter nos données graphiquement afin d'avoir une idée de l'effet du vent sur le nombre de strophes totales émises par les mésanges.
+```{r}
+graph_temperature <- ggplot(data = data_mesanges_modifiee, 
+                     aes(x = Vent, 
+                         y = nombre_total, color=Vent)) +
+  scale_color_viridis() +
+  geom_point() +
+  geom_jitter() +
+  xlab("Vitesse du Vent en km/h") +
+  ylab("Nombre de strophes émises par les mésanges\n lors d'une session d'observation de 6 minutes") +
+  ggtitle("Influence du vent sur le chant des oiseaux\n suite à la diffusion")
+graph_temperature
+```
+
+On souhaite maintenant tester s'il y a une influence significative du vent sur le nombre de strophes émises par les mésanges. Pour cela, on réalise un test de corrélation:
+
+On utilise un test de Kruskal-Wallis non paramétrique pour associer un rang à chaque point.
+```{r}
+kruskal.test(nombre_total~as.factor(Vent), data_mesanges_modifiee) 
+```
+Il n'y a pas de relation significative entre les différentes conditions de vent et les réponse des mésanges.
+
+Pour aller plus loin, il est possible d'utiliser des modèles linéaires généralisés.
+```{r}
+modele_vent <- glm(nombre_total ~ Vent, data = data_mesanges_modifiee, family = poisson)
+summary(modele_vent)
+DescTools::PseudoR2(modele_vent, which = "all")
+```
+
+On peut ensuite modéliser les prédictions de chants associés à chaque catégorie de vent en utilisant le modèle linéaire généralisé:
+```{r}
+# Nouveau dataframe avec chaque niveau de pluie
+niveaux_vent <- data.frame(Vent = unique(data_mesanges_modifiee$Vent))
+
+# Prédictions du modèle pour chaque niveau
+niveaux_vent$pred <- predict(modele_vent, newdata = niveaux_vent, type = "response")
+
+ggplot(data_mesanges_modifiee, aes(x = Vent, y = nombre_total, color = "Données observées")) +
+  geom_jitter(width = 0.2, alpha = 0.4, show.legend = TRUE) +
+  geom_point(data = niveaux_vent, aes(x = Vent, y = pred, color="Prédictions"), size = 3, show.legend = TRUE) +
+  ggtitle("Prédictions du modèle par catégorie de vent") +
+  xlab("Vitesse du vent en km/h") +
+  ylab("Nombre de strophes") +
+  scale_color_manual( name = "Type de points", values = c("Données observées" = "black", "Prédictions" = "red"))
+mod_cat <- glm(nombre_total ~ as.factor(Vent), data = data_mesanges_modifiee, family = quasipoisson)
+```
+
+\newpage
+# Influence du son diffusé sur la réponse comportementale des mésanges
+
+## Réponse comportementale des mésanges charbonnières à la diffusion de chants inversés
+
+Les mésanges charbonnières produisent des chants constitués de strophes à deux ou trois notes. Grâce à l'utilisation de logiciels comme Audacity, il est possible d'inverser l’ordre des strophes dans les enregistrements. Nous nous sommes donc demandés si les mésanges charbonnières étaient capables de répondre à de tels enregistrements modifiés, et si tel était le cas, si la diffusion de ces chants inversés entraînait des réactions comparables à celles observées lors de la diffusion de chants non modifiés.
+
+Par ailleurs, nous avons constaté sur le terrain que l’inversion de chants à deux notes conservait malgré tout le rythme de la bande sonore originale. Selon notre perception humaine, la différence nous semblait moins marquée que dans le cas des chants inversés à trois notes, qui différaient, selon nous, nettement des versions originales.
+
+Nous nous sommes donc également demandé si la réponse comportementale des mésanges charbonnières était plus marquée lors de la diffusion d’un chant inversé à deux notes que lors de la diffusion d’un chant inversé à trois notes.
+
+De manière plus générale, cette étude vise à mieux comprendre les éléments du chant qui participent à la reconnaissance entre congénères. L’ordre des strophes joue-t-il un rôle essentiel dans cette reconnaissance ? Est-ce une caractéristique fondamentale, ou les mésanges se basent-elles davantage sur d'autres éléments acoustiques tels que la hauteur (pitch), la fréquence ou encore le rythme du chant ?
+
+Préparation des données:
+Nous créons de nouveaux dataframes ne conservant que les variables d’intérêt pour cette analyse. C'est-à-dire les enregistrements correspondant aux mésanges charbonnières, en sélectionnant les sous-types de chants suivants : C2N, C3N, C2NI, C3NI et T.
+
+```{r}
+# Création d’un premier data frame permettant l’étude de l’intensité de la réponse (c’est-à-dire que l’on prend en considération le nombre de strophes émises par les mésanges).
+data_mesanges_verlan <- data_mesanges_modifiee[, c("temps_total", "Son", "Post_2","Post_3","Latence_approche_charbo", "Latence_chant_charbo", "Pluie", "Jour","Vent","Temperature","Male","Ensoleillement","Nombre_passage")]
+data_mesanges_verlan$somme_charbo_post <- data_mesanges_modifiee$somme_charbo_post
+
+# Création d’une nouvelle colone permettant l’étude de l’existence ou non d’une réponse de la mésange charbonnière, de manière binaire.
+data_mesanges_verlan$chant_binaire <- ifelse(data_mesanges_verlan$Post_2 != 0 | data_mesanges_verlan$Post_3 != 0, 1, 0)
+
+# Création d'un second data frame qui permet de s'intéresser uniquement aux observations où on avait diffusé les sous-types de chants suivants: C2N, C3N, C2NI, C3NI et T
+data_mesanges_verlan_filtre <- data_mesanges_verlan[data_mesanges_verlan$Son %in% c("C2N", "C3N","C2NI","C3NI","T"), ]
+```
+
+Réalisation de graphiques pour explorer la question: 
+
+Boxplot de l'intensité de la réponse c'est-à-dire du nombre de strophes émises par les mésanges en fonction de la nature du chant qui a été diffusé. 
+```{r}
+graph_reponse_inverse_intensite <- ggplot(data = data_mesanges_verlan_filtre, 
+                                            aes(x = Son, y = somme_charbo_post, color = Son)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red")+
+  xlab("Son diffusé") + 
+  ylab("Nombre de strophes émises post diffusion") +  
+  ggtitle("Intensité de la réponse au chant en fonction du son diffusé")  
+graph_reponse_inverse_intensite
+```
+À partir de ce boxplot, on peut constater que le nombre de strophes émises suite à la diffusion du chant de troglodyte est en moyenne faible, proche de zéro (environ 3 ou 4 strophes), avec une faible variabilité. Ce résultat est cohérent avec le fait que ce son servait de témoin négatif.
+
+En revanche, la réponse au chant de mésange charbonnière à deux notes non inversé présente également une médiane qui vaut 0 et une moyenne assez faible concernant le nombre de strophe car elle vaut environ 5, ce qui n’était pas forcément attendu.
+
+On observe néanmoins, dans tous les cas, une réponse des mésanges charbonnières aux chants inversés à deux et trois notes. Ainsi, il semble exister une réponse comportementale à la diffusion de chants inversés, quel que soit le type de strophe.
+
+Cette fois-ci, on trace un boxplot qui s’intéresse non pas à l’intensité de la réponse, mais uniquement à la présence ou non d’une réponse de la part des mésanges. 
+L’étude de la réponse binaire et de l’intensité sont complémentaires. La réponse binaire permet de valider l’existence d’une perception ou d’une reconnaissance ("Est-ce que la mésange réagit ?"), tandis que l’intensité permet de nuancer l’interprétation ("A quel point la mésange réagit ?").
+
+```{r}
+# Calcul de la proportion de réponse (1) par type de son
+freq_par_son <- data_mesanges_verlan_filtre %>%
+  group_by(Son) %>%
+  summarise(
+    reponse = mean(chant_binaire),
+    n = n())
+
+# Graphique en barres
+ggplot(freq_par_son, aes(x = Son, y = reponse, fill = Son)) +
+  geom_col() +
+  ylim(0, 1.1) +
+  ylab("Fréquence de la réponse au chant diffusé") +
+  xlab("Son diffusé") +
+  ggtitle("Taux de réponse binaire au chant selon le son diffusé")
+
+```
+On observe que la fréquence de réponse au chant chant inversé deux notes et trois notes est similaire à celle au chant 3 notes avec une fréquence proche de 0,75. Alors que cette fréquence de réponse est bien plus faible dans cas de la diffusion du chant Troglodyte (témoin) et du chant de la charbonnière à 2 notes avec une fréquence plus proche de 0,25 et 0,3 respectivement.
+
+On cherche à savoir maintenant à l'aide de tests statistiques non paramétriques s'il existe des différences significatives dans l'intensité de la réponse des mésanges en fonction du chant diffusé.
+```{r}
+resultats_wilcox_inverse <- data.frame(
+  Groupe_1 = character(),
+  Groupe_2 = character(),
+  p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+paires_groupe <- list(
+  c("C2N", "C2NI"),      
+  c("C2N", "T"),  
+  c("C2NI", "T"),
+  c("C3N", "C3NI"),
+  c("C3N", "T"),
+  c("C3NI", "T"),
+  c("C2NI", "C3NI"),
+  c("C2N", "C3N")
+)
+
+# Pour chaque paire de groupes, effectuer le test de Wilcoxon et stocker la p-value
+for (p in paires_groupe) {
+  # Filtrer les données pour chaque groupe de la paire
+  data_mesange_inverse <- data_mesanges_modifiee[data_mesanges_modifiee$Son %in% p, ]
+  
+  # Effectuer le test de Wilcoxon
+  test_result <- wilcox.test(somme_charbo_post ~ Son, 
+                             data = data_mesange_inverse, 
+                             alternative = "two.sided",
+                             exact = FALSE)
+
+  resultats_wilcox_inverse <- rbind(resultats_wilcox_inverse, data.frame(
+    Groupe_1 = p[1],
+    Groupe_2 = p[2],
+    p_value = test_result$p.value 
+  ))}
+
+print(resultats_wilcox_inverse)
+```
+
+Graphique qui représente les différences significatives avec les résultats du test du Wilcoxon
+```{r}
+graph_reponse_inverse_intensite_s <- ggplot(data = data_mesanges_verlan_filtre, 
+                                            aes(x = Son, y = somme_charbo_post, color = Son)) +
+  geom_boxplot() +
+  stat_summary(fun = mean, geom = "point", shape = 20, size = 3, color = "red")+
+  xlab("Son diffusé") + 
+  ylab("Nombre de strophes émises post diffusion") +  
+  ggtitle("Intensité de la réponse au chant en fonction du son diffusé")
+
+
+comparaisons <- data.frame(
+  group1 = c("C2N", "C2NI", "C3N", "C3NI",  "C2N"),
+  group2 = c("C2NI", "T", "T", "T",  "C3N"),
+  p = c(0.046,  0.007, 0.007, 0.017, 0.025),  
+  y.position = c(28,  32, 36, 38, 42),
+  label = c("*", "*", "*", "*", "*")  
+)
+
+graph_reponse_inverse_intensite_s +  stat_pvalue_manual(comparaisons, 
+                     tip.length = 0.01,
+                     bracket.size = 0.5,
+                     label.size = 5)
+
+```
+**Conclusions :** Les mésanges charbonnières répondent de manière significatives à la diffusion de chant inversé 2 notes et 3 notes. Elles ne répondent pas plus à la diffusion de chant 2 notes par rapport aux chant 3 notes comme on avait pu le penser initialement. 
+
+## Communication interspécifique entre les mésanges bleues et les mésanges charbonnières
+
+Cette partie a 2 objectifs. D'une part, elle vise à étudier la réponse des mésanges charbonnières aux mésanges bleues. Et d'autre, part, elle a pour but d'étudier la réponse des mésanges bleues aux mésanges charbonnières. 
+Sur le terrain, on a pu se rendre compte, notamment dans les jardins Descartes où les territoires de plusieurs types de mésanges se chevauchent, que les mésanges charbonnières chantaient souvent lors de la diffusion de chants de mésanges bleues. Dans le cas contraire, c'est-à-dire quand des chants de mésanges charbonnières étaient diffusés, peu de mésanges bleues étaient observées.
+
+Objectif 1 : Nous nous sommes donc demandés comment les mésanges charbonnières répondent aux diffusions de mésanges bleues? Et y-a t'il une réponse générale à tous les chants de mésanges bleues ou plutôt spécifique à certains types de chants (courts, longs, ou sans trilles)?
+
+Objectif 2 : Nous nous sommes aussi demandés comment les mésanges bleues répondent aux diffusions de mésanges charbonnières? Et y-a t'il une réponse générale à tous les chants de mésanges charbonnières ou plutôt une réponse spécifique à certains types de chants (chants à 2 notes, ou à 3 notes)?
+
+### Réponses des mésanges charbonnières aux chants de mésanges bleues.
+
+Avant toute étude sur la communication interspécifique des mésanges charbonnières, il faut s'assurer que la diffusion de chants de mésanges charbonnières déclenche une réponse des mésanges charbonnières elles-mêmes. Dans ce cas, des analyses de comparaison entre types de chants diffusés seront possibles.
+
+On souhaite comparer la réponse des mésanges charbonnières avant et après la diffusion de chants.Pour cela, on créer un nouveau data frame pour pouvoir séparer les réponses pre et post diffusion à chaque son diffusé.
+```{r}
+# Créer un dataframe long avec deux colonnes : "Moment" (Pre/Post) et "Valeur"
+data_long <- data_mesanges_modifiee %>%
+  mutate(
+    Pre = somme_charbo_pre,
+    Post = somme_charbo_post) %>%
+  pivot_longer(
+    cols = c(Pre, Post),
+    names_to = "Moment",
+    values_to = "Nombre_Strophes")
+#réordonner pré avant post
+data_long$Moment <- factor(data_long$Moment, levels = c("Pre", "Post"))
+```
+
+On créer les tableaux contenant les variables d'interêt pour les différents tests.
+```{r}
+data_C2N <- data_long %>% filter(Son=="C2N" )
+data_C3N<- data_long %>% filter(Son=="C3N" )
+data_T <- data_long %>% filter(Son=="T")
+
+#réorganiser les niveaux pour avoir un affichage plus lisible sur le graphique
+data_C2N$Moment <- factor(data_C2N$Moment, levels = c("Pre", "Post"))
+data_C3N$Moment <- factor(data_C3N$Moment, levels = c("Pre", "Post"))
+data_T$Moment <- factor(data_T$Moment, levels = c("Pre", "Post"))
+```
+
+Comparaison avant et après diffusion de l'intensité du chant des mésanges charbonnières lors de chants à deux strophes de charbonnières
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_C2N, exact = FALSE)
+```
+```{r}
+t1 <- ggplot(data_C2N, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Réponse aux chants\n2 notes de charbonnières")+
+  ylab("Nombre de réponses des\n mésanges charbonnières")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3")) +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+t1
+```
+
+Comparaison avant et après diffusion de l'intensité du chant des mésanges charbonnières lors de chants à trois notes de charbonnières
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_C3N, exact = FALSE)
+```
+```{r}
+t2 <- ggplot(data_C3N, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Réponse aux chants\n 3 notes de charbonnières")+
+  ylab("Nombre de réponses des\n mésanges charbonnières")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3")) +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+t2
+```
+
+Comparaison avant et après diffusion de l'intensité du chant des mésanges charbonnières lors de chants de troglodytes
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_T, exact = FALSE)
+```
+```{r}
+t3 <- ggplot(data_T, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Réponse aux chants\n de troglodytes")+
+  ylab("Nombre de réponses des\n mésanges charbonnières")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3")) +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+t3
+```
+
+Représentation du panel:
+```{r}
+t2_with_significance <- t2 +
+  # Ajouter la barre horizontale avec annotate
+  annotate("segment", x = 1, xend = 2, y = 30 + 1, yend = 30 + 1, 
+           color = "black", size = 1) +  # Ligne horizontale
+  # Ajouter du texte pour la significativité avec une étoile
+  annotate("text", x = 1.5, y = 30 + 1.5, label = "***", size = 6, color = "black")
+
+
+t1 + t2_with_significance + t3
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "left")
+```
+La diffusion de chants de mésanges charbonnière déclenche une réponse significative des mésanges charbonnières uniquement dans le cas d'une diffusion de chant 3 notes. Le fait que la réponse ne soit pas significative dans le cas du chant 2 notes pourrait être dû au manque de données (puisque c'est la première fois que le TP est effectué). La non significativité de la réponse au troglodyte confirme son utilisation en tant que témoin.
+
+On peut maintenant s'intéresser à la réponse des mésanges charbonnières aux différents chants et en particulier aux chants de mésanges bleues et de troglodytes.Sur le terrain, il a été possible de quantifier l'intensité des chants des mésanges en comptant le nombre de strophes qu'elles émettaient.
+
+On trace la réponse des mésanges charbonnières aux différents chants diffusés.
+```{r}
+ggplot(data_mesanges_modifiee,aes(Son,somme_charbo_post,color=Son))+
+  geom_boxplot()+
+  ylab("Nombre de strophes après diffusion")+
+  ggtitle("Réponse des mésanges charbonnières\n aux différents chants diffusés")
+```
+
+On compare avec les chants produits par les mésanges charbonnières avant la diffusion. On représente sur un même graphique l'intensité du chant des mésanges charbonnières avant et après diffusion. 
+```{r}
+ggplot(data_long, aes(x = Son, y = Nombre_Strophes, fill = Moment)) +
+  geom_boxplot(position = position_dodge(width = 0.75)) +
+  ylab("Nombre de strophes")+
+  xlab("Chant diffusé")+
+  ggtitle("Comparaison de l'activité et de la réponse\n des mésanges charbonnières (avant et après diffusion)") +
+  scale_fill_manual(values = c("Pre" = "orange", "Post" = "aquamarine3")) +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+
+Puisqu'on s'intéresse spécifiquement à la réponse face aux chants de mésanges bleues, on séléctionne uniquement les sons qui sont interessants pour l'étude en créant un nouveau data frame. 
+On ne conserve donc que les diffusions de mésanges bleues et du témoin pour voir la réponse générale des mésanges charbonnières aux mésanges bleues.
+```{r}
+data_communication <- data_long %>% filter(Son=="BC" | Son=="BL" | Son=="BS" | Son=="T")
+
+ggplot(data_communication, aes(x = Son, y = Nombre_Strophes, fill = Moment)) +
+  geom_boxplot(position = position_dodge(width = 0.75))+
+  ylab("Nombre de strophes émises par\n les mésanges charbonnières")+
+  ggtitle("Réponse des mésanges charbonnières\n aux différents chants diffusés")+
+  scale_fill_manual(values = c("Pre" = "orange", "Post" = "aquamarine3"))
+```
+Il semble il y avoir une réponse plus importante pour la diffusion de chants de mésanges bleues spécifiquement les chants longs par rapport aux chant de troglodytes. La diffusion semble cependant déclencher une réponse dans tous les cas.
+
+On réalise alors des tests statistiques pour savoir si il y a une réponse statistiquement différente des mésanges charbonnières aux chants de mésanges bleues par rapport aux chants de troglodytes. 
+Les troglodytes sont les témoins de l'étude, on s'attend à ce que les mésanges charbonnières ne répondent pas particulièrement aux troglodytes.
+Pour ce test, on compare 2 conditions ensembles : la réponse aux chants de troglodyte et la réponse aux chants de mésanges bleues (tous types confondus).
+
+On va utiliser un test non paramétrique de Wilcoxon pour comparer les modalités deux-à-deux.
+
+On peut comparer le nombre de strophes avant et après diffusion pour chaque type de chant pour voir si la diffusion déclenche une réponse significative des mésanges charbonnières.
+
+Pour cela, on ajoute une colonne au data frame communication dans laquelle il y aura le type d'oiseau associé à la diffusion, c'est-à-dire soit troglodyte, soit mésange bleue.
+```{r}
+data_communication$type <- rep(0,nrow(data_communication))
+for (i in 1:nrow(data_communication)){
+  if (data_communication$Son[i] == "T") {
+    data_communication$type[i] <- "Troglodyte"}
+  else {
+    data_communication$type[i] <- "Bleue"}}
+```
+
+On créer différents tableaux qui permettent de ne conserver que les chants à comparer entre eux.
+```{r}
+data_BC <- data_communication %>% filter(Son=="BC" )
+data_BL<- data_communication %>% filter(Son=="BL" )
+data_BS<- data_communication %>% filter(Son=="BS" )
+#le tableau data_T ayant déjà été créer pour es comparaisons entre chants de charbonnières.
+
+#réorganiser les niveaux pour avoir un affichage plus lisible sur le graphique
+data_BC$Moment <- factor(data_BC$Moment, levels = c("Pre", "Post"))
+data_BL$Moment <- factor(data_BL$Moment, levels = c("Pre", "Post"))
+data_BS$Moment <- factor(data_BS$Moment, levels = c("Pre", "Post"))
+```
+
+On effectue ensuite un test de Wilcoxon pour voir si il y a une différence entre la réponse par rapport aux chants diffusés, à savoir de mésange bleue et de troglodyte (test deux-à-deux).
+
+Comparaison avant et après diffusion de l'intensité du chant des mésanges charbonnières lors de chants de chants courts de mésanges bleues.
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_BC, exact = FALSE)
+```
+```{r}
+p1 <- ggplot(data_BC, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Réponse aux chants\n courts de mésanges bleues")+
+  ylab("Réponses des\n mésanges charbonnières")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3")) +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+p1
+```
+La diffusion ne déclenche pas de réponse significative des mésanges charbonnières aux chants courts de mésanges bleues.
+
+Comparaison avant et après diffusion de l'intensité du chant des mésanges charbonnières lors de chants longs de mésanges bleues.
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_BL, exact = FALSE)
+```
+```{r}
+p2 <- ggplot(data_BL, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Réponse aux chants\n longs de mésanges bleues")+
+  ylab("Réponses des\n mésanges charbonnières")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3")) +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+p2
+```
+La diffusion déclenche une réponse significative des mésanges charbonnières aux chants longs de mésanges bleues.
+
+Comparaison avant diffusion de l'intensité du chant des mésanges charbonnières lors de chants sans trilles de mésanges bleues.
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_BS, exact = FALSE)
+```
+```{r}
+p3 <- ggplot(data_BS, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Réponse aux chants\n sans trilles de mésanges bleues")+
+  ylab("Réponses des\n mésanges charbonnières")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3")) +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+p3
+```
+La diffusion déclenche (presque) une réponse significative des mésanges charbonnières aux chants sans trilles de mésanges bleues. Il y a peut-être trop peu de données pour observer une différence statistiquement significative ?
+
+Comparaison avant et après diffusion de l'intensité du chant des mésanges charbonnières lors de chants de troglodytes.
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_T, exact = FALSE)
+```
+```{r}
+p4 <- ggplot(data_T, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Réponse aux chants\n de troglodytes")+
+  ylab("Réponses des\n mésanges charbonnières")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3")) +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+p4
+```
+La diffusion ne déclenche pas de réponse significative des mésanges charbonnières aux chants de troglodytes.
+
+Affichage de tous les graphiques
+```{r}
+# Ajouter les barres de significativité sur p2
+p2_with_significance <- p2 +
+  # Ajouter la barre horizontale avec annotate
+  annotate("segment", x = 1, xend = 2, y = 8 + 1, yend = 8 + 1, 
+           color = "black", size = 1) +  # Ligne horizontale
+  # Ajouter du texte pour la significativité avec une étoile
+  annotate("text", x = 1.5, y = 8 + 1.5, label = "*", size = 6, color = "black")
+
+(p4 | p3) / (p2_with_significance | p1) + 
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "left")
+```
+
+**Conclusion :** La diffusion déclenche donc une réponse significative des mésanges charbonnières à certains chants de mésange bleue, en particulier aux chants longs. 
+
+### Réponses des mésanges bleues aux chants de mésanges charbonnières.
+
+Avant toute étude sur la communication interspécifique des mésanges bleues, il faut s'assurer que la diffusion de chants de mésanges bleues déclenche une réponse des mésanges bleues elles-mêmes. Dans ce cas, des analyses de comparaison entre types de chants diffusés seront possibles.
+
+On souhaite comparer la réponse des mésanges bleues avant et après la diffusion de chants.Pour cela, on créer un nouveau data frame pour pouvoir séparer les réponses pre et post diffusion à chaque son diffusé.
+```{r}
+# Créer un dataframe long avec deux colonnes : "Moment" (Pre/Post) et "Valeur"
+data_long_bleue <- data_mesanges_modifiee %>%
+  mutate(
+    Pre = somme_bleue_pre,
+    Post = somme_bleue_post) %>%
+  pivot_longer(
+    cols = c(Pre, Post),
+    names_to = "Moment",
+    values_to = "Nombre_Strophes")
+data_long_bleue$Moment <- factor(data_long$Moment, levels = c("Pre", "Post"))
+```
+
+On créer les tableaux contenant les variables d'interêt pour les différents tests.
+```{r}
+data_BCb <- data_long_bleue %>% filter(Son=="BC" )
+data_BLb<- data_long_bleue %>% filter(Son=="BL" )
+data_BSb <- data_long_bleue %>% filter(Son=="BS")
+
+#réorganiser les niveaux pour avoir un affichage plus lisible sur le graphique
+data_BCb$Moment <- factor(data_BCb$Moment, levels = c("Pre", "Post"))
+data_BLb$Moment <- factor(data_BLb$Moment, levels = c("Pre", "Post"))
+data_BSb$Moment <- factor(data_BSb$Moment, levels = c("Pre", "Post"))
+```
+
+Comparaison avant et après diffusion de l'intensité du chant des mésanges bleues lors de la diffusion de chants courts.
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_BCb, exact = FALSE)
+```
+```{r}
+b1 <- ggplot(data_BCb, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Réponse aux chants\n courts")+
+  ylab("Réponses des mésanges bleues")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3")) +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+b1
+```
+Les mésanges bleues ne répondent pas significativement aux chants courts de mésanges bleues.
+
+Comparaison avant et après diffusion de l'intensité du chant des mésanges bleues lors de la diffusion de chants longs.
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_BLb, exact = FALSE)
+```
+```{r}
+b2 <- ggplot(data_BLb, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Réponse aux chants\n longs")+
+  ylab("Réponses des mésanges bleues")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3")) +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+b2
+```
+En utilisant un critère de conservation de l'hypothèse nulle tel que p<0.10 (ce qui semble raisonnable puisque peu de données sont traitées dans cette étude), on peut dire que les mésanges bleues répondent de manière significative aux chants longs de mésanges bleues.
+
+Comparaison avant et après diffusion de l'intensité du chant des mésanges bleues lors de la diffusion de chants sans trilles
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_BSb, exact = FALSE)
+```
+```{r}
+b3 <- ggplot(data_BSb, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Réponse aux chants\n sans trilles")+
+  ylab("Réponses des mésanges bleues")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3")) +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+b3
+```
+En utilisant un critère de conservation de l'hypothèse nulle tel que p < 0.10 (ce qui semble raisonnable puisque peu de données sont traitées dans cette étude), on peut dire que les mésanges bleues répondent de manière significative aux chants sans trilles de mésanges bleues.
+
+```{r}
+# Ajouter les barres de significativité sur b2
+b2_with_significance <- b2 +
+  # Ajouter la barre horizontale avec annotate
+  annotate("segment", x = 1, xend = 2, y = 40 + 1, yend = 40 + 1, 
+           color = "black", size = 1) +  # Ligne horizontale
+  # Ajouter du texte pour la significativité avec une étoile
+  annotate("text", x = 1.5, y = 40 + 1.5, label = "*", size = 6, color = "black")
+b3_with_significance <- b3 +
+  # Ajouter la barre horizontale avec annotate
+  annotate("segment", x = 1, xend = 2, y = 60 + 1, yend = 60 + 1, 
+           color = "black", size = 1) +  # Ligne horizontale
+  # Ajouter du texte pour la significativité avec une étoile
+  annotate("text", x = 1.5, y = 60 + 1.5, label = "***", size = 6, color = "black")
+
+(b1 | b2_with_significance|b3_with_significance) + 
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "left")
+```
+
+On peut maintenant s'intéresser à la réponse des mésanges bleues aux différents chants et en particulier aux chants de mésanges charbonnières et de troglodytes
+
+On trace la réponse des mésanges bleues aux différents chants diffusés.
+```{r}
+ggplot(data_mesanges_modifiee,aes(Son,somme_bleue_post,color=Son))+
+  geom_boxplot()+
+  ylab("Nombre de strophes après diffusion")+
+  ggtitle("Réponse des mésanges bleues aux différents chants diffusés")
+```
+
+On compare avec la réponse des mésanges bleues avant la diffusion de chants.
+On représente sur un même graphique les réponses avant et après diffusion. 
+```{r}
+ggplot(data_long_bleue, aes(x = Son, y = Nombre_Strophes, fill = Moment)) +
+  geom_boxplot(position = position_dodge(width = 0.75)) +
+  ylab("Nombre de strophes")+
+  xlab("Chant diffusé")+
+  ggtitle("Activité des mésanges bleues avant et après diffusion") +
+  scale_fill_manual(values = c("Pre" = "orange", "Post" = "aquamarine3"))
+
+```
+
+On ne conserve ensuite que les diffusions de mésanges charbonnières et du témoin pour voir la réponse générale des mésanges bleues aux mésanges charbonnières
+```{r}
+data_communication_bleue <- data_long_bleue %>% filter(Son=="C2N" | Son=="C3N" | Son=="T")
+
+ggplot(data_communication_bleue, aes(x = Son, y = Nombre_Strophes, fill = Moment)) +
+  geom_boxplot(position = position_dodge(width = 0.75))+
+  ylab("Nombre de strophes après diffusion\n de chants de mésange charbonnières")+
+  xlab("Chant diffusé")+
+  ggtitle("Réponse des mésanges bleues aux différents chants diffusés")+
+  scale_fill_manual(values = c("Pre" = "orange", "Post" = "aquamarine3"))
+
+```
+Les mésanges bleues semblent répondre aux chants de troglodytes mais pas aux chants de mésanges bleues. On réalise des tests statistiques non-paramétriques de Wilcoxon pour comparer 2 à 2 les modalités.
+
+Pour cela, on ajoute une colonne au data frame communication dans laquelle il y aura le type d'oiseau associé à la diffusion, c'est-à-dire soit troglodyte, soit mésange charbonnière:
+```{r}
+data_communication_bleue$type <- rep(0,nrow(data_communication_bleue))
+for (i in 1:nrow(data_communication_bleue)){
+  if (data_communication_bleue$Son[i] == "T") {
+    data_communication_bleue$type[i] <- "Troglodyte"}
+  else {
+    data_communication_bleue$type[i] <- "Charbo"}}
+```
+
+On effectue ensuite un test de Wilcoxon pour voir si il y a une différence entre la réponse par rapport aux chants diffusés de mésange bleue et de troglodyte (test deux-à-deux).
+
+On compare l'intensité du chant avant et après diffusion pour chaque type de chant pour voir si la diffusion déclenche une réponse significative des mésanges bleues.
+
+Création des différents tableaux qui permettent de ne conserver que les chants à comparer entre eux.
+```{r}
+data_C2Nb <- data_communication_bleue %>% filter(Son=="C2N" )
+data_C3Nb<- data_communication_bleue %>% filter(Son=="C3N" )
+data_Tb <- data_communication_bleue %>% filter(Son=="T" )
+
+#réorganiser les niveaux pour avoir un affichage plus lisible sur le graphique
+data_C2Nb$Moment <- factor(data_C2Nb$Moment, levels = c("Pre", "Post"))
+data_C3Nb$Moment <- factor(data_C3Nb$Moment, levels = c("Pre", "Post"))
+data_Tb$Moment <- factor(data_Tb$Moment, levels = c("Pre", "Post"))
+```
+
+Comparaison avant et après diffusion de l'intensité du chant des mésanges bleues lors de la diffusion de chants 2 notes de mésanges charbonnières.
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_C2Nb, exact = FALSE)
+```
+```{r}
+c1 <- ggplot(data_C2Nb, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Strophes 2 notes")+
+  ylab("Nombre de réponses\n des bleues")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3"))
+c1
+```
+La diffusion ne déclenche pas de réponse significative des mésanges bleues aux chants composés de strophes 2 notes de mésanges charbonnières.
+
+Comparaison avant et après diffusion de l'intensité du chant des mésanges bleues lors de la diffusion de chants 3 notes de mésanges charbonnières.
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_C3Nb, exact = FALSE)
+```
+```{r}
+c2 <- ggplot(data_C3Nb, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Strophes 3 notes")+
+  ylab("Nombre de réponses des bleues")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3"))
+c2
+```
+La diffusion ne déclenche pas de réponse significative des mésanges bleues aux chants composés de strophes 3 notes de mésanges charbonnières.
+
+Comparaison avant et après diffusion de l'intensité du chant des mésanges bleues lors de la diffusion de chants de troglodytes
+```{r}
+wilcox.test(Nombre_Strophes ~ Moment, data = data_Tb, exact = FALSE)
+```
+```{r}
+c3 <- ggplot(data_Tb, aes(Moment,Nombre_Strophes,color=Moment))+
+  geom_boxplot()+
+  ggtitle("Chants de\n troglodytes")+
+  ylab("Nombre de réponses des bleues")+
+  xlab("Moment")+
+  scale_color_manual(values = c("Pre" = "orange", "Post" = "aquamarine3"))
+c3
+```
+La diffusion déclenche une réponse significative des mésanges bleues aux chants de troglodytes.
+
+```{r}
+# Ajouter les barres de significativité sur p2
+c3_with_significance <- c3 +
+  # Ajouter la barre horizontale avec annotate
+  annotate("segment", x = 1, xend = 2, y = 30 + 1, yend = 30 + 1, 
+           color = "black", size = 1) +  # Ligne horizontale
+  # Ajouter du texte pour la significativité avec une étoile
+  annotate("text", x = 1.5, y = 30 + 1.5, label = "*", size = 6, color = "black")
+
+
+(c1|c2|c3_with_significance) + 
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "bottom")
+```
+Ainsi, les mésanges bleues répondent de manière significative aux troglodytes mais pas aux mésanges charbonnières. Cela confirme les observations de terrain. Le troglodyte ne serait donc pas un bon oiseau contrôle pour les mésanges bleues puisqu'elles répondent à son chant. 
+
+D'un point de vue biologique, le fait que les mésanges bleues répondent aux troglodytes mais que les mésanges charbonnières ne le fassent pas pourrait s'expliquer par la plus grande ressemblance entre les chants de mésanges bleues et les chants de troglodytes. Notamment la présence de trilles dans certains chants peut être comparée à la fin du chant du troglodyte.Au delà de la ressemblance en terme de fréquence de chant (comme avec la charbonnière), il y a une ressemblance dans la syntaxe du chant, c'est-à-dire l'organisation, et aussi dans le rythme.
+
+## L’imitation du chant diffusé dans la réponse comportementale des mésanges
+
+Ici, on se pose la question de la part d'imitation du chant diffusé par les mésanges.Par exemple, est-ce que si on diffuse du chant 2 notes de charbonnières, les mésanges charbonnières répondent significativement plus en chant 2 notes?
+Cette question est appliquée pour les mésanges charbonières en réponse à du chant 2 notes, 3 notes, 3 notes inversé ou 2 notes inversé. Et aux mésanges bleues en réponse à du chant court, long et sans trilles.
+
+Pour répondre à cette question, il est nécessaire d'introduire une donnée de taux de chant après diffusion, pour chaque type de mésange, dans le data frame data_mesanges_modifiee. Ce taux de chant permettra ensuite d'extraire, parmi tous les chants produits, un type de chant et d'observer son abondance.
+```{r}
+data_mesanges_modifiee$Taux_chant_post_charbo <- as.numeric(sprintf( (data_mesanges_modifiee$somme_charbo_post / 5) / ((data_mesanges_modifiee$somme_charbo_post / 5) + data_mesanges_modifiee$somme_charbo_pre), fmt ='%.2f'))
+
+data_mesanges_modifiee$Taux_chant_post_bleue <- as.numeric(sprintf( (data_mesanges_modifiee$somme_bleue_post / 5) / ((data_mesanges_modifiee$somme_bleue_post / 5) + data_mesanges_modifiee$somme_bleue_pre), fmt ='%.2f'))
+
+data_mesanges_modifiee$Male <- as.factor(data_mesanges_modifiee$Male)
+```
+
+On représente les taux de chants pour les mésanges bleues et charbonnières avant et après diffusion.
+```{r}
+ggplot(data_mesanges_modifiee) +
+  geom_jitter(mapping = aes(x = Nombre_passage, y = Taux_chant_post_bleue, color = "Mésange bleue"), size = 2, show.legend = TRUE) +
+  geom_jitter(mapping = aes(x = Nombre_passage, y = Taux_chant_post_charbo, color = "Mésange charbonnière"), size = 2, show.legend = TRUE) + 
+   scale_color_manual(name = "Espèce", values = c("Mésange bleue" = "steelblue", "Mésange charbonnière" = "gold")) +
+  labs(title ="Taux de chants après diffusion en fonction du nombre de passages", x = "Nombre de passage", y = "Taux de chants après diffusion")  +
+  theme_minimal()
+
+line_pre_charbo <- ggplot(data_mesanges_modifiee) +
+  geom_line(aes(x = Nombre_passage, y = somme_charbo_pre, color = Male)) +
+  scale_y_continuous(limits = c(0, 20))
+
+line_post_charbo <- ggplot(data_mesanges_modifiee) +
+  geom_line(aes(x = Nombre_passage, y = somme_charbo_post / 5, color = Male)) +
+  scale_y_continuous(limits = c(0, 20))
+
+line_pre_bleue <- ggplot(data_mesanges_modifiee) +
+  geom_line(aes(x = Nombre_passage, y = somme_bleue_pre, color = Male)) +
+  scale_y_continuous(limits = c(0, 40))
+
+line_post_bleue <- ggplot(data_mesanges_modifiee) +
+  geom_line(aes(x = Nombre_passage, y = somme_bleue_post / 5, color = Male)) +
+  scale_y_continuous(limits = c(0, 40))
+
+ggarrange(line_pre_charbo, line_post_charbo, line_pre_bleue, line_post_bleue,
+                         labels = c("Pré charbo", "Post charbo", "Pré bleues", "Post bleues"),
+                         ncol = 2, nrow = 2)
+```
+
+Pour estimer l'imitation du chant diffusé, on créer de nouvelles colonnes qui permettent d'une part d'extraire le nombre de chants produits par la mésange qui sont du même type que le chant diffusé, et d'autre part de transformer ce nombre de chants en une fréquence en le divisant par le nombre total de chants produits par la mésange après diffusion.
+```{r}
+# Création de la colonne imitation
+
+imitation_charbo <- numeric()
+imitation_bleue <- numeric()
+
+for (i in 1:139) {
+  if (data_mesanges_modifiee$Son[i] == "C3N" || data_mesanges_modifiee$Son[i] == "C3NI") {
+    imitation_charbo = append(imitation_charbo, data_mesanges_modifiee$Post_3[i])
+    imitation_bleue = append(imitation_bleue, NA)
+  }
+  if (data_mesanges_modifiee$Son[i] == "C2N" || data_mesanges_modifiee$Son[i] == "C2NI") {
+    imitation_charbo = append(imitation_charbo, data_mesanges_modifiee$Post_2[i])
+    imitation_bleue = append(imitation_bleue, NA)
+  }
+  if (data_mesanges_modifiee$Son[i] == "BS") {
+    imitation_bleue = append(imitation_bleue, data_mesanges_modifiee$Sans_trilles_post[i])
+    imitation_charbo = append(imitation_charbo, NA)
+  }
+  if (data_mesanges_modifiee$Son[i] == "BC") {
+    imitation_bleue = append(imitation_bleue, data_mesanges_modifiee$Court_post[i])
+    imitation_charbo = append(imitation_charbo, NA)
+  }
+  if (data_mesanges_modifiee$Son[i] == "BL") {
+    imitation_bleue = append(imitation_bleue, data_mesanges_modifiee$Long_post[i])
+    imitation_charbo = append(imitation_charbo, NA)
+  }
+  if (data_mesanges_modifiee$Son[i] == "T") {
+    imitation_bleue = append(imitation_bleue, NA)
+    imitation_charbo = append(imitation_charbo, NA)
+  }
+}
+
+data_mesanges_modifiee$Nbr_imitation_charbo <- imitation_charbo
+data_mesanges_modifiee$Nbr_imitation_bleue <- imitation_bleue
+
+data_mesanges_modifiee$Taux_imitation_charbo <- as.numeric( sprintf(data_mesanges_modifiee$Nbr_imitation_charbo / data_mesanges_modifiee$somme_charbo_post, fmt ='%.2f'))
+data_mesanges_modifiee$Taux_imitation_bleue <- as.numeric( sprintf(data_mesanges_modifiee$Nbr_imitation_bleue / data_mesanges_modifiee$somme_bleue_post, fmt ='%.2f'))
+```
+
+
+Analyse de l'imitation par les mésanges bleues
+```{r}
+hist(data_mesanges_modifiee$Taux_imitation_bleue,
+     main = "Effectifs de mésange bleues\n imitant avec un certain taux",
+     xlab = "Taux d'imitation par les mésanges bleues",
+     ylab = "Somme des effectifs")
+```
+Les mésanges bleues semblent chanter davantage un chant différent de celui qu'elles entendent (plus grande fréquence de 0). Il s'agit maintenant de tester cela et de distinguer parmi les différents chants de la mésange bleues, lesquels sont plus susceptibles d'être imité.
+
+Analyse de l'imitation par les mésanges charbonnières
+```{r}
+hist(data_mesanges_modifiee$Taux_imitation_charbo,
+     main = "Effectifs de mésange charbonnières\n imitant avec un certain taux",
+     xlab = "Taux d'imitation par les mésanges charbonnières",
+     ylab = "Somme des effectifs")
+```
+Les mésanges charbonnières semblent chanter davantage le chant qu'elles entendent plutôt qu'un autre chant (plus grande fréquence de 1). Il s'agit maintenant de tester cela statistiquement, et de distinguer parmi les différents chants de la mésange charbonnière, lesquels sont plus susceptibles d'être imité.
+
+On veut maintenant voir précisement la part de chaque type de chant qui est immitée par la mésange. Pour chaque type de chant, on va comparer le taux d'imitation de ce chant et un témoin. Ce témoin est construit de la même façon que le taux d'imitation mais en prenant comme données le nombre de chant avant diffusion. Il permet d'estimer le taux d'imitation "naturel" qui n'était pas induit par la diffusion d'un chant.
+
+Imitation par les mésanges charbonnières de chant à 2 notes
+```{r}
+construction_temoin_charbo <- data_mesanges_modifiee[data_mesanges_modifiee$somme_charbo_pre != 0, ] %>% select(c("Pre_2", "Pre_3","somme_charbo_pre"))
+
+temoin_charbo_C2N <- data.frame()
+temoin_charbo_C2N <- data.frame(matrix(ncol = 0, nrow = nrow(construction_temoin_charbo)))
+temoin_charbo_C2N$Catégorie <- rep("Témoin", nrow(temoin_charbo_C2N))
+temoin_charbo_C2N$Taux <- round(construction_temoin_charbo$Pre_2 / construction_temoin_charbo$somme_charbo_pre, 2)
+
+construction_post2_charbo <- data_mesanges_modifiee[data_mesanges_modifiee$somme_charbo_post != 0 & data_mesanges_modifiee$Son == "C2N", ] %>% select(c("Post_2", "somme_charbo_post"))
+
+donnee_charbo_C2N <- data.frame()
+donnee_charbo_C2N <- data.frame(matrix(ncol = 0, nrow = nrow(construction_post2_charbo)))
+donnee_charbo_C2N$Catégorie <- rep("Imitation C2N", nrow(donnee_charbo_C2N))
+donnee_charbo_C2N$Taux <- round(construction_post2_charbo$Post_2 / construction_post2_charbo$somme_charbo_post, 2)
+
+imit_C2N <- rbind(temoin_charbo_C2N, donnee_charbo_C2N)
+```
+
+```{r}
+wilcox_test(data = imit_C2N, formula = Taux ~ Catégorie)
+```
+
+```{r}
+plot_C2N <- ggplot(imit_C2N, aes(x = Catégorie, y = Taux)) +
+  geom_boxplot() +
+  xlab("Catégorie") +
+  ylab("Taux d'imitation") +
+  scale_y_continuous(limits = c(0, 1.2),  breaks = seq(0, 1, by = 0.2)) +
+  ggtitle("Après C2N") +  
+  geom_signif(
+    comparisons = list(c("Témoin", "Imitation C2N")),
+    test = "wilcox.test",
+    test.args = list(exact = FALSE),
+    map_signif_level = TRUE,
+    y_position = max(imit_C2N$Taux) + 0.1,   # Barre au-dessus des boxplots
+    size = 1,                                # Taille trait
+    textsize = 5)                            # Taille étoile
+```
+
+Imitation par les mésanges charbonnières de chant à 3 notes
+```{r}
+temoin_charbo_C3N <- data.frame()
+temoin_charbo_C3N <- data.frame(matrix(ncol = 0, nrow = nrow(construction_temoin_charbo)))
+temoin_charbo_C3N$Catégorie <- rep("Témoin", nrow(temoin_charbo_C3N))
+temoin_charbo_C3N$Taux <- round(construction_temoin_charbo$Pre_3 / construction_temoin_charbo$somme_charbo_pre, 2)
+
+construction_post3_charbo <- data_mesanges_modifiee[data_mesanges_modifiee$somme_charbo_post != 0 & data_mesanges_modifiee$Son == "C3N", ] %>% select(c("Post_3", "somme_charbo_post"))
+
+donnee_charbo_C3N <- data.frame()
+donnee_charbo_C3N <- data.frame(matrix(ncol = 0, nrow = nrow(construction_post3_charbo)))
+donnee_charbo_C3N$Catégorie <- rep("Imitation C3N", nrow(donnee_charbo_C3N))
+donnee_charbo_C3N$Taux <- round(construction_post3_charbo$Post_3 / construction_post3_charbo$somme_charbo_post, 2)
+
+imit_C3N <- rbind(temoin_charbo_C3N, donnee_charbo_C3N)
+```
+
+```{r}
+wilcox_test(data = imit_C3N, formula = Taux ~ Catégorie)
+```
+
+```{r}
+plot_C3N <- ggplot(imit_C3N, aes(x = Catégorie, y = Taux)) +
+  geom_boxplot() +
+  xlab("Catégorie") +
+  ylab("Taux d'imitation") +
+  scale_y_continuous(limits = c(0, 1.2),  breaks = seq(0, 1, by = 0.2)) +
+  ggtitle("Après C3N") +
+  geom_signif(
+    comparisons = list(c("Témoin", "Imitation C3N")),
+    test = "wilcox.test",
+    test.args = list(exact = FALSE),
+    map_signif_level = TRUE,
+    y_position = max(imit_C3N$Taux) + 0.1,
+    size = 1,
+    textsize = 5)
+```
+
+Imitation par les mésanges charbonnières de l'ensemble du chant inversé à deux notes (ici, une imitation est définie comme une réponse avec le même nombre de notes).
+```{r}
+construction_postq2NI_charbo <-data_mesanges_modifiee[data_mesanges_modifiee$somme_charbo_post != 0 & (data_mesanges_modifiee$Son == "C2NI"), ] %>% select(c("Post_2", "somme_charbo_post"))
+
+donnee_charbo_qC2NI <- data.frame()
+donnee_charbo_qC2NI <- data.frame(matrix(ncol = 0, nrow = nrow(construction_postq2NI_charbo)))
+donnee_charbo_qC2NI$Catégorie <- rep("Imitation C2NI", nrow(donnee_charbo_qC2NI))
+donnee_charbo_qC2NI$Taux <- round(construction_postq2NI_charbo$Post_2 / construction_postq2NI_charbo$somme_charbo_post, 2)
+
+imit_qC2NI <- rbind(temoin_charbo_C2N, donnee_charbo_qC2NI)
+```
+
+```{r}
+wilcox_test(data = imit_qC2NI, formula = Taux ~ Catégorie)
+```
+
+```{r}
+plot_qC2NI <- ggplot(imit_qC2NI, aes(x = Catégorie, y = Taux)) +
+  geom_boxplot() +
+  xlab("Catégorie") +
+  ylab("Taux d'imitation") +
+  scale_y_continuous(limits = c(0, 1.2),  breaks = seq(0, 1, by = 0.2)) +
+  ggtitle("Après C2NI") +
+  geom_signif(
+    comparisons = list(c("Témoin", "Imitation C2NI")),
+    test = "wilcox.test",
+    test.args = list(exact = FALSE),
+    map_signif_level = TRUE,
+    y_position = max(imit_qC2NI$Taux) + 0.1,
+    size = 1,
+    textsize = 5)
+```
+
+Imitation par les mésanges charbonnières de l'ensemble du chant inversé à trois notes (ici, une imitation est définie comme une réponse avec le même nombre de notes).
+```{r}
+construction_postq3NI_charbo <-data_mesanges_modifiee[data_mesanges_modifiee$somme_charbo_post != 0 & (data_mesanges_modifiee$Son == "C3NI"), ] %>% select(c("Post_3", "somme_charbo_post"))
+
+donnee_charbo_qC3NI <- data.frame()
+donnee_charbo_qC3NI <- data.frame(matrix(ncol = 0, nrow = nrow(construction_postq3NI_charbo)))
+donnee_charbo_qC3NI$Catégorie <- rep("Imitation C3NI", nrow(donnee_charbo_qC3NI))
+donnee_charbo_qC3NI$Taux <- round(construction_postq3NI_charbo$Post_3 / construction_postq3NI_charbo$somme_charbo_post, 2)
+
+imit_qC3NI <- rbind(temoin_charbo_C3N, donnee_charbo_qC3NI)
+```
+
+```{r}
+wilcox_test(data = imit_qC3NI, formula = Taux ~ Catégorie)
+```
+
+```{r}
+plot_qC3NI <- ggplot(imit_qC3NI, aes(x = Catégorie, y = Taux)) +
+  geom_boxplot() +
+  xlab("Catégorie") +
+  ylab("Taux d'imitation") +
+  scale_y_continuous(limits = c(0, 1.2),  breaks = seq(0, 1, by = 0.2)) +
+  ggtitle("Après C3NI") +
+  geom_signif(
+    comparisons = list(c("Témoin", "Imitation C3NI")),
+    test = "wilcox.test",
+    test.args = list(exact = FALSE),
+    map_signif_level = TRUE,
+    y_position = max(imit_qC2NI$Taux) + 0.1,
+    size = 1,
+    textsize = 5)
+```
+
+Imitation par les mésanges charbonnières de l'ensemble des chants à 2 notes
+```{r}
+construction_post2NI_charbo <- data_mesanges_modifiee[data_mesanges_modifiee$somme_charbo_post != 0 & (data_mesanges_modifiee$Son == "C2N" | data_mesanges_modifiee$Son == "C2NI"), ] %>% select(c("Post_2", "somme_charbo_post"))
+
+donnee_charbo_C2NI <- data.frame()
+donnee_charbo_C2NI <- data.frame(matrix(ncol = 0, nrow = nrow(construction_post2NI_charbo)))
+donnee_charbo_C2NI$Catégorie <- rep("Im. C2N et C2NI", nrow(donnee_charbo_C2NI))
+donnee_charbo_C2NI$Taux <- round(construction_post2NI_charbo$Post_2 / construction_post2NI_charbo$somme_charbo_post, 2)
+
+imit_C2NI <- rbind(temoin_charbo_C2N, donnee_charbo_C2NI)
+```
+
+```{r}
+wilcox_test(data = imit_C2NI, formula = Taux ~ Catégorie)
+```
+
+```{r}
+plot_C2NI <- ggplot(imit_C2NI, aes(x = Catégorie, y = Taux)) +
+  geom_boxplot() +
+  xlab("Catégorie") +
+  ylab("Taux d'imitation") +
+  scale_y_continuous(limits = c(0, 1.2),  breaks = seq(0, 1, by = 0.2)) +
+  ggtitle("Après C2N + C2NI") +
+  geom_signif(
+    comparisons = list(c("Témoin", "Im. C2N et C2NI")),
+    test = "wilcox.test",
+    test.args = list(exact = FALSE),
+    map_signif_level = TRUE,
+    y_position = max(imit_C2NI$Taux) + 0.1,
+    size = 1,
+    textsize = 5)
+```
+
+Imitation par les mésanges charbonnières de l'ensemble des chants à trois notes
+```{r}
+construction_post3NI_charbo <- data_mesanges_modifiee[data_mesanges_modifiee$somme_charbo_post != 0 & (data_mesanges_modifiee$Son == "C3N" | data_mesanges_modifiee$Son == "C3NI"), ] %>% select(c("Post_3", "somme_charbo_post"))
+
+donnee_charbo_C3NI <- data.frame()
+donnee_charbo_C3NI <- data.frame(matrix(ncol = 0, nrow = nrow(construction_post3NI_charbo)))
+donnee_charbo_C3NI$Catégorie <- rep("Im. C3N et C3NI", nrow(donnee_charbo_C3NI))
+donnee_charbo_C3NI$Taux <- round(construction_post3NI_charbo$Post_3 / construction_post3NI_charbo$somme_charbo_post, 2)
+
+imit_C3NI <- rbind(temoin_charbo_C3N, donnee_charbo_C3NI)
+```
+
+```{r}
+wilcox_test(data = imit_C3NI, formula = Taux ~ Catégorie)
+```
+
+```{r}
+plot_C3NI <- ggplot(imit_C3NI, aes(x = Catégorie, y = Taux)) +
+  geom_boxplot() +
+  xlab("Catégorie") +
+  ylab("Taux d'imitation") +
+  scale_y_continuous(limits = c(0, 1.2),  breaks = seq(0, 1, by = 0.2)) +
+  ggtitle("Après C3N + C3NI") +
+  geom_signif(
+    comparisons = list(c("Témoin", "Im. C3N et C3NI")),
+    test = "wilcox.test",
+    test.args = list(exact = FALSE),
+    map_signif_level = TRUE,
+    y_position = max(imit_C3NI$Taux) + 0.1,  
+    size = 1,
+    textsize = 5)
+```
+
+Tracé des boxplots dans un panel
+```{r}
+ggarrange(plot_C2N, plot_qC2NI, plot_C2NI, plot_C3N, plot_qC3NI, plot_C3NI,
+          ncol = 3, nrow = 2)
+```
+Il n'y a pas de différences significatives après la diffusion de chants à 2 notes dans le chant des mésanges charbonnières. Cela est peut-être lié à l'observation du III-2) où les mésanges charbonnières ne répondaient pas significativement au chant à 2 notes. Mais il faut aussi noter que dans notre jeu de données, seules quatre observations ont montré des chants de charbonnière avant diffusion contenant autre chose que des chants à deux notes (de plus, deux de ces chants donne le même rapport "chants à 2 notes / somme des chants"). Ainsi, une absence d'effet montre une absence de chants à trois notes, mais ne permet pas de déduire si cette absence est due à un phénomène d'imitation ou simplement à la répétition des chants les plus courants chez les mésanges. Les mêmes conclusions peuvent être tirées par analyse de la réponse aux chants inversés à deux notes. Cependant, lorsque l'on groupe l'ensemble des chants à 2 notes, on observe une différence significative, la diffusion ayant entraînée un changement de comportement, avec plus de chants à trois notes. Cela laisse supposer que l'absence d'effet observée précedemment est due à un manque de données. \\
+Il n'y a pas non plus d'imitation significative du chant à 3 notes par les mésanges charbonnières. Il est probable que cet abscence d'effet significatif soit dû à un manque de données. Cependant, elles répondent significativement aux chants inversés à trois notes par un chant à trois notes, ce que l'on peut estimer être une imitation (puisqu'ici il s'agit d'un choix de chanter avec le même nombre de notes). Lorsque l'on regroupe ces données, il y a encore une différence significative. \\
+Une hypothèse ne pouvant cependant pas être écartée est que la présence d'une mésange charbonnière sur le territoire d'un autre mâle entraîne chez ce dernier plus de chants à trois notes (ce qui expliquerait toute les observations, sans passer par le prisme d'une imitation). Ce phénomène serait alors juste exacerbé lors de la diffusion de chants inversé à trois notes (puisque c'est le seul cas où l'on observe une différence significative).
+
+Imitation par les mésanges bleues de chants de mésanges bleues sans trilles.
+```{r}
+construction_temoin_bleue <- data_mesanges_modifiee[data_mesanges_modifiee$somme_bleue_pre != 0, ] %>% select(c("Sans_trilles_pre", "Court_pre", "Long_pre", "somme_bleue_pre"))
+
+temoin_bleu_BS <- data.frame()
+temoin_bleue_BS <- data.frame(matrix(ncol = 0, nrow = nrow(construction_temoin_bleue)))
+temoin_bleue_BS$Catégorie <- rep("Témoin", nrow(temoin_bleue_BS))
+temoin_bleue_BS$Taux <- round(construction_temoin_bleue$Sans_trilles_pre / construction_temoin_bleue$somme_bleue_pre, 2)
+
+construction_postBS_bleue <- data_mesanges_modifiee[data_mesanges_modifiee$somme_bleue_post != 0 & data_mesanges_modifiee$Son == "BS", ] %>% select(c("Sans_trilles_post", "somme_bleue_post"))
+
+donnee_bleue_BS <- data.frame()
+donnee_bleue_BS <- data.frame(matrix(ncol = 0, nrow = nrow(construction_postBS_bleue)))
+donnee_bleue_BS$Catégorie <- rep("Imitation BS", nrow(donnee_bleue_BS))
+donnee_bleue_BS$Taux <- round(construction_postBS_bleue$Sans_trilles_post / construction_postBS_bleue$somme_bleue_post, 2)
+
+imit_BS <- rbind(temoin_bleue_BS, donnee_bleue_BS)
+```
+
+```{r}
+wilcox_test(data = imit_BS, formula = Taux ~ Catégorie,exact=FALSE)
+```
+
+```{r}
+imit_BS$Catégorie <- factor(imit_BS$Catégorie, levels = c("Témoin", "Imitation BS"))
+
+plot_BS <- ggplot(imit_BS, aes(x = Catégorie, y = Taux)) +
+  geom_boxplot() +
+  xlab("Catégorie") +
+  ylab("Taux d'imitation") +
+  scale_y_continuous(limits = c(0, 1.2),  breaks = seq(0, 1, by = 0.2)) +
+  ggtitle("Après BS") +  
+  geom_signif(
+    comparisons = list(c("Témoin", "Imitation BS")),
+    map_signif_level = TRUE,
+    y_position = max(imit_BS$Taux) + 0.1,
+    size = 1,
+    textsize = 5
+  ) +
+  stat_compare_means(method = "wilcox.test", label = "p.signif")
+```
+
+Imitation par les mésanges bleues de chants de mésanges bleues courts
+```{r}
+temoin_bleu_BC <- data.frame()
+temoin_bleue_BC <- data.frame(matrix(ncol = 0, nrow = nrow(construction_temoin_bleue)))
+temoin_bleue_BC$Catégorie <- rep("Témoin", nrow(temoin_bleue_BC))
+temoin_bleue_BC$Taux <- round(construction_temoin_bleue$Court_pre / construction_temoin_bleue$somme_bleue_pre, 2)
+
+construction_postBC_bleue <- data_mesanges_modifiee[data_mesanges_modifiee$somme_bleue_post != 0 & data_mesanges_modifiee$Son == "BC", ] %>% select(c("Court_post", "somme_bleue_post"))
+
+donnee_bleue_BC <- data.frame()
+donnee_bleue_BC <- data.frame(matrix(ncol = 0, nrow = nrow(construction_postBC_bleue)))
+donnee_bleue_BC$Catégorie <- rep("Imitation BC", nrow(donnee_bleue_BC))
+donnee_bleue_BC$Taux <- round(construction_postBC_bleue$Court_post / construction_postBC_bleue$somme_bleue_post, 2)
+
+imit_BC <- rbind(temoin_bleue_BC, donnee_bleue_BC)
+```
+
+```{r}
+wilcox_test(data = imit_BC, formula = Taux ~ Catégorie,exact=FALSE)
+```
+
+```{r}
+imit_BC$Catégorie <- factor(imit_BC$Catégorie, levels = c("Témoin", "Imitation BC"))
+
+plot_BC <- ggplot(imit_BC, aes(x = Catégorie, y = Taux)) +
+  geom_boxplot() +
+  xlab("Catégorie") +
+  ylab("Taux d'imitation") +
+  scale_y_continuous(limits = c(0, 1.2),  breaks = seq(0, 1, by = 0.2)) +
+  ggtitle("Après BC") +  
+  geom_signif(
+    comparisons = list(c("Témoin", "Imitation BC")),
+    map_signif_level = TRUE,
+    y_position = max(imit_BC$Taux) + 0.1,
+    size = 1,
+    textsize = 5
+  ) +
+  stat_compare_means(method = "wilcox.test", label = "p.signif")
+```
+
+Imitation par les mésanges bleues de chants de mésanges bleues longs
+```{r}
+temoin_bleu_BL <- data.frame()
+temoin_bleue_BL <- data.frame(matrix(ncol = 0, nrow = nrow(construction_temoin_bleue)))
+temoin_bleue_BL$Catégorie <- rep("Témoin", nrow(temoin_bleue_BL))
+temoin_bleue_BL$Taux <- round(construction_temoin_bleue$Long_pre / construction_temoin_bleue$somme_bleue_pre, 2)
+
+construction_postBL_bleue <- data_mesanges_modifiee[data_mesanges_modifiee$somme_bleue_post != 0 & data_mesanges_modifiee$Son == "BL", ] %>% select(c("Long_post", "somme_bleue_post"))
+
+donnee_bleue_BL <- data.frame()
+donnee_bleue_BL <- data.frame(matrix(ncol = 0, nrow = nrow(construction_postBL_bleue)))
+donnee_bleue_BL$Catégorie <- rep("Imitation BL", nrow(donnee_bleue_BL))
+donnee_bleue_BL$Taux <- round(construction_postBL_bleue$Long_post / construction_postBL_bleue$somme_bleue_post, 2)
+
+imit_BL <- rbind(temoin_bleue_BL, donnee_bleue_BL)
+```
+
+```{r}
+wilcox_test(data = imit_BC, formula = Taux ~ Catégorie,exact=FALSE)
+```
+
+```{r}
+imit_BL$Catégorie <- factor(imit_BL$Catégorie, levels = c("Témoin", "Imitation BL"))
+
+plot_BL <- ggplot(imit_BL, aes(x = Catégorie, y = Taux)) +
+  geom_boxplot() +
+  xlab("Catégorie") +
+  ylab("Taux d'imitation") +
+  scale_y_continuous(limits = c(0, 1.2),  breaks = seq(0, 1, by = 0.2)) +
+  ggtitle("Après BL") +  
+  geom_signif(
+    comparisons = list(c("Témoin", "Imitation BL")),
+    map_signif_level = TRUE,
+    y_position = max(imit_BL$Taux) + 0.1,
+    size = 1,
+    textsize = 5
+  ) +
+  stat_compare_means(method = "wilcox.test", label = "p.signif")
+```
+
+```{r}
+ggarrange(plot_BS, plot_BC, plot_BL,
+          ncol = 3, nrow = 1)
+```
+Les mésanges bleues n'imitent pas les chants de mésanges bleues diffusés. On peut faire le lien avec le III-2) où l'on a pu voir que les mésanges bleues répondaient de manière significative aux chants longs et sans trilles de mésanges bleues. Ici, cela complète la conclusion du III-2) puisque cela nous montre que même si la diffusion déclenche une réponse significative des mésanges bleues, elles ne répondent pas le même type de chant que celui qui a été diffusé.
+Ainsi, la communication entre mésanges bleues n'implique pas des réponses du même type que le chant qui a été émis en premier. Cela pourrait suggérer que la signification d'une réponse en chant 2 notes est différente à celle d'une réponse en chant 3 notes.
+
+\newpage
+# Étude de l’atténuation de la réponse comportementale des mésanges
+
+Objectif : Avoir une idée de la présence ou non d'une atténuation dans la réponse à la diffusion chez les mésanges. D'une part la réponse en terme d'émission de chant et d'autre part dans la venue des mésanges charbonnières sur le site de diffusion. A l'analyse de leur venue ou non sur le site de diffusion, une analyse du temps qu'elles ont mises pour y parvenir et/ou pour y chanter, sera effectuée.
+
+## Réponses des mésanges à la diffusion de son
+
+On crée un nouveau tableau à partir du tableau de données brutes. On crée une colonne de durée qui permet d'apporter une information temporelle sur la durée de l'expérience. Cette colonne est la somme du temps depuis 7h45 le lundi 15 avril jusqu'au jeudi 18 avril.
+```{r}
+data_mesanges_duree <- data.frame(data_mesanges$Jour,data_mesanges$Minute,data_mesanges$Nombre_passage,data_mesanges$Vu_charbo,data_mesanges$Post_2,data_mesanges$Post_3,data_mesanges$Pre_2,data_mesanges$Pre_3,data_mesanges$Vu_bleue,data_mesanges$Sans_trilles_pre,data_mesanges$Sans_trilles_post,data_mesanges$Court_pre,data_mesanges$Court_post,data_mesanges$Long_pre,data_mesanges$Long_post)
+
+colnames(data_mesanges_duree) <- c("Jour","Minute","Nombre_passage","Vu_charbo","Post_2","Post_3","Pre_2","Pre_3","Vu_bleue","Sans_trilles_pre","Sans_trilles_post","Court_pre","Court_post","Long_pre","Long_post")
+
+data_mesanges_duree$Post_charbo <- as.numeric(data_mesanges_duree$Post_2) +as.numeric(data_mesanges_duree$Post_3)
+
+data_mesanges_duree$Pre_charbo <- as.numeric(data_mesanges_duree$Pre_3) +as.numeric(data_mesanges_duree$Pre_2)
+
+data_mesanges_duree$Post_bleue <- as.numeric(data_mesanges_duree$Court_post) +as.numeric(data_mesanges_duree$Long_post)+as.numeric(data_mesanges_duree$Sans_trilles_post)
+
+data_mesanges_duree$Pre_bleue <- as.numeric(data_mesanges_duree$Court_pre) +as.numeric(data_mesanges_duree$Long_pre)+as.numeric(data_mesanges_duree$Sans_trilles_pre)
+
+data_mesanges_duree$duree <- data_mesanges_modifiee$temps_total
+
+data_mesanges_duree$Jour <- as.factor(data_mesanges_duree$Jour)
+```
+
+### Observation de l'attenuation après diffusion sur le chant des mésanges charbonnières détéctées (vues ou entendues).
+En sélectionnant les mésanges détectées après diffusion, on sélectionne les mésanges susceptibles d'avoir entendu la diffusion.
+
+#### Détermination du test à effectuer
+```{r}
+data_mesanges_duree_Post_charbo <-  data_mesanges_duree %>%
+  filter(Vu_charbo == 1 | Post_charbo > 0)
+
+ggplot(data_mesanges_duree_Post_charbo, aes(duree, Post_charbo, colour = data_mesanges_duree_Post_charbo$Jour, )) +
+  geom_point(show.legend = TRUE) +
+  ylab("Nombre de strophes chantées par une mésange\n charbonnière après diffusion") +
+  xlab("Durée en min") +
+  ggtitle("Attenuation au cours de l'expérience du nombre de strophes\n chantées par les mésanges charbonnières")
+```
+
+Réalisation d'un test non paramétrique (Kruskal-test) car les observations ne suivent pas une loi normale. (vérification dans la suite) 
+
+On crée un tableau qui prendra comme valeur toutes les p-value associées aux différentes conditions : il s'agira d'un résumé des tests effectués.
+```{r}
+data_test <- data.frame(c("Post_charbo_jour_1", "Post_charbo_jour_2", "Post_charbo_jour_3", "Post_charbo_jour_4", "Pre_charbo_jour_1", "Pre_charbo_jour_2", "Pre_charbo_jour_3", "Pre_charbo_jour_4", "Post_bleue_jour_1", "Post_bleue_jour_2", "Post_bleue_jour_3", "Post_bleue_jour_4", "Pre_bleue_jour_1", "Pre_bleue_jour_2", "Pre_bleue_jour_3", "Pre_bleue_jour_4"), c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0), c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+colnames(data_test) <- c("Condition", "Variation_interjour", "Variation_intrajour")
+```
+
+Pour savoir le type de test à utiliser, on analyse la distribution des résidus. 
+```{r}
+# Création du modèle linéaire et extraction des résidus
+lm1 <- lm(Post_charbo ~ Jour, data_mesanges_duree)
+residus1 <- resid(lm1)
+
+# Tracer du graphe comparant la distribution des résidus à une gaussienne
+ggplot(data_mesanges_duree, aes(x = residus1)) +
+  geom_density(fill = "lightgreen", alpha = 0.5) +
+  stat_function(
+    fun = dnorm, 
+    args = list(
+      mean = mean(data_mesanges_duree$Post_charbo, na.rm = TRUE),
+      sd = sd(data_mesanges_duree$Post_charbo, na.rm = TRUE)),
+    color = "red",
+    size = 1) +
+  ggtitle("Courbe de densité de nombre de strophes après diffusion par rapport à une Gaussienne") +
+  xlab("Valeurs de nombre de strophes après diffusion") +
+  ylab("Densité") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+# Test de Shapiro-Wilk pour la normalité
+shapiro.test(residus1)
+```
+On rejette l'hypothèse de normalité. On réalise donc un test non-paramétrique (Kruskal-test) car les observations ne suivent pas une loi normale.
+
+#### Variation inter-journalière de la réponse des mésanges charbonnières. \\
+On cherche à savoir si la réponse des charbonnières aux diffusions varie entre les jours donc au cours de l'expérience.
+```{r}
+kruskal.test(Post_charbo ~ Jour, data_mesanges_duree)
+data_test$Variation_interjour[1:4] <- kruskal.test(Post_charbo ~ Jour, data_mesanges_duree)$p.value
+```
+On conserve l'hypothèse nulle : il n'y a pas d'effet du jour sur le nombre de chants effectués par les charbonnières en réponse à la diffusion.
+
+#### Variation intra-journalière de la réponse des mésanges charbonnières. \\
+On cherche à savoir si la réponse des charbonnières aux diffusions varie au sein d'un jour.
+Pour cela on test "Post_charbo" en regroupant les minutes en plage de temps pour faire des comparaisons plus solides avec le test de Kruskal-Wallis. On créer donc une nouvelle colonne "Plage_Temps" qui représente différents moments de la journée
+
+Détermination du nombre de classes représentant l'heure de la journée :
+```{r}
+nb_classe = mean(c(44, 83-44, 139-108)) %>% sqrt() %>% as.integer()
+```
+
+Détermination des classes :
+```{r}
+sort_min <- sort(data_mesanges_duree[data_mesanges_duree$Jour %in% c(1, 2, 4), "Minute"])
+sort_min <- unique(sort_min)
+
+t1 <- sort_min[as.integer(length(sort_min)/nb_classe)]
+t2 <- sort_min[as.integer(length(sort_min)/nb_classe) *2]
+t3 <- sort_min[as.integer(length(sort_min)/nb_classe) *3]
+t4 <- sort_min[as.integer(length(sort_min)/nb_classe) *4]
+t5 <- sort_min[as.integer(length(sort_min)/nb_classe) *5]
+```
+
+Ajout de la colonne :
+```{r}
+data_mesanges_duree[, "Plage_temps"] = NA 
+for (i in 1:139){
+  if(data_mesanges_duree$Minute[i] <= t1){
+    data_mesanges_duree$Plage_temps[i] = 1
+  }
+  if(data_mesanges_duree$Minute[i] > t1 && data_mesanges_duree$Minute[i] <= t2){
+    data_mesanges_duree$Plage_temps[i] = 2
+  }
+  if(data_mesanges_duree$Minute[i] > t2 && data_mesanges_duree$Minute[i] <= t3){
+    data_mesanges_duree$Plage_temps[i] = 3
+  }
+  if(data_mesanges_duree$Minute[i] > t3 && data_mesanges_duree$Minute[i] <= t4){
+    data_mesanges_duree$Plage_temps[i] = 4
+  }
+  if(data_mesanges_duree$Minute[i] > t4 && data_mesanges_duree$Minute[i] <= t5){
+    data_mesanges_duree$Plage_temps[i] = 5
+  }
+  if(data_mesanges_duree$Minute[i] > t5){
+    data_mesanges_duree$Plage_temps[i] = 6
+  }
+}
+```
+
+```{r}
+data_mesanges_duree %>%
+  group_by(Jour) %>%
+  summarise(p_value = kruskal.test(Post_charbo ~ Plage_temps)$p.value)
+
+```
+
+Ajout des valeurs dans le tableau de résumé data_test:
+```{r}
+# Étape 1 : extraire les p-values par jour
+jours <- unique(data_mesanges_duree$Jour)
+
+for (j in jours) {
+  # Sous-ensemble des données pour un jour donné
+  df_jour <- subset(data_mesanges_duree, Jour == j)
+  
+  # Effectuer le test Kruskal-Wallis, gérer les erreurs
+  p_val <- kruskal.test(Post_charbo ~ Plage_temps, data = df_jour)$p.value
+  # Nom à rechercher dans data_test
+  condition_name <- paste0("Post_charbo_jour_", j)
+  
+  # Mettre la p-value dans la colonne Variation_intrajour
+  data_test$Variation_intrajour[data_test$Condition == condition_name] <- p_val
+}
+```
+
+### Observation de l'attenuation avant diffusion sur les mésanges charbonnières détéctées (vues ou entendues) par la suite.
+
+#### Détermination du test à effectuer
+```{r}
+data_mesanges_duree_Pre_charbo <-  data_mesanges_duree %>%
+  filter(Vu_charbo == 1 | Pre_charbo > 0)
+
+ggplot(data_mesanges_duree_Pre_charbo,aes(duree,Pre_charbo, colour = Jour)) +
+  geom_point(show.legend = TRUE) +
+  ylab("Nombre de strophes chantées par\n une mésanges charbonnière avant diffusion") +
+  xlab("Durée en min") +
+  ggtitle("Attenuation au cours de l'expérience du nombre de strophes\n chantées par les charbonnières avant diffusion") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+
+Pour savoir le type de test à utiliser, on analyse la distribution des résidus. 
+```{r}
+# Création du modèle linéaire et extraction des résidus
+lm2 <- lm(Pre_charbo ~ Jour, data_mesanges_duree)
+residus2 <- resid(lm2)
+
+# Tracer du graphe comparant la distribution des résidus à une gaussienne
+ggplot(data_mesanges_duree, aes(x = residus2)) +
+  geom_density(fill = "lightgreen", alpha = 0.5) +
+  stat_function(
+    fun = dnorm, 
+    args = list(
+      mean = mean(data_mesanges_duree$Pre_charbo, na.rm = TRUE),
+      sd = sd(data_mesanges_duree$Pre_charbo, na.rm = TRUE)),
+    color = "red",
+    size = 1) +
+  ggtitle("Courbe de densité de nombre de strophes avant diffusion par rapport à une Gaussienne") +
+  xlab("Valeurs de nombre de strophes avant diffusion") +
+  ylab("Densité") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+# Test de Shapiro-Wilk pour la normalité
+shapiro.test(residus2)
+```
+On rejette l'hypothèse de normalité. On réalise donc un test non-paramétrique (Kruskal-test) car les observations ne suivent pas une loi normale.
+
+#### Variation inter-journalière des chants pré-diffusion des mésanges charbonnières.
+```{r}
+kruskal.test(Pre_charbo ~ Jour, data_mesanges_duree)
+data_test$Variation_interjour[5:8] <- kruskal.test(Pre_charbo ~ Jour, data_mesanges_duree)$p.value
+```
+
+#### Variation intra-journalière des chants pré-diffusion des mésanges charbonnières.
+```{r}
+data_mesanges_duree %>%
+  group_by(Jour) %>%
+  summarise(p_value = kruskal.test(Pre_charbo ~ Plage_temps)$p.value)
+```
+
+Ajout des valeurs dans le tableau résumé data_test:
+```{r}
+# Étape 1 : extraire les p-values par jour
+jours <- unique(data_mesanges_duree$Jour)
+
+for (j in jours) {
+  # Sous-ensemble des données pour un jour donné
+  df_jour <- subset(data_mesanges_duree, Jour == j)
+  
+  # Effectuer le test Kruskal-Wallis, gérer les erreurs
+  p_val <- kruskal.test(Pre_charbo ~ Plage_temps, data = df_jour)$p.value
+  # Nom à rechercher dans data_test
+  condition_name <- paste0("Pre_charbo_jour_", j)
+  
+  # Mettre la p-value dans la colonne Variation_intrajour
+  data_test$Variation_intrajour[data_test$Condition == condition_name] <- p_val
+}
+```
+
+### Observation de l'attenuation après diffusion sur le chant des mésanges bleues détéctées (vues ou entendues).
+
+#### Détermination du test à effectuer
+```{r}
+data_mesanges_duree_Post_bleue <-  data_mesanges_duree %>%
+  filter(Vu_bleue == 1 | Post_bleue > 0)
+
+ggplot(data_mesanges_duree_Post_bleue, aes(duree, Post_bleue, colour = Jour)) +
+  geom_point(show.legend = TRUE) +
+  ylab("Nombre de strophes chantées par\n une mésanges bleue après diffusion") +
+  xlab("Durée en min") +
+  ggtitle("Attenuation au cours de l'expérience du nombre de strophes") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+
+Pour savoir le type de test à utiliser, on analyse la distribution des résidus. 
+```{r}
+# Création du modèle linéaire et extraction des résidus
+lm3 <- lm(Post_bleue~Jour,data_mesanges_duree)
+residus3 <- resid(lm3)
+
+# Tracer du graphe comparant la distribution des résidus à une gaussienne
+ggplot(data_mesanges_duree, aes(x = residus3)) +
+  geom_density(fill = "lightgreen", alpha = 0.5) +
+  stat_function(
+    fun = dnorm, 
+    args = list(
+      mean = mean(data_mesanges_duree$Post_bleue, na.rm = TRUE),
+      sd = sd(data_mesanges_duree$Post_bleue, na.rm = TRUE)),
+    color = "red",
+    size = 1) +
+  ggtitle("Courbe de densité de nombre de strophes après diffusion par rapport à une Gaussienne") +
+  xlab("Valeurs de nombre de strophes après diffusion") +
+  ylab("Densité") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+# Test de Shapiro-Wilk pour la normalité
+shapiro.test(residus3)
+```
+On rejette l'hypothèse de normalité. On réalise donc un test non-paramétrique (Kruskal-test) car les observations ne suivent pas une loi normale.
+
+#### Variation inter-journalière de la réponse des mésanges bleues.
+```{r}
+kruskal.test(Post_bleue ~ Jour, data_mesanges_duree)
+data_test$Variation_interjour[9:12] <- kruskal.test(Post_bleue ~ Jour, data_mesanges_duree)$p.value
+```
+
+#### Variation intra-journalière de la réponse des mésanges bleues.
+```{r}
+data_mesanges_duree %>%
+  group_by(Jour) %>%
+  summarise(p_value = kruskal.test(Post_bleue ~ Plage_temps)$p.value)
+```
+
+Ajout des valeurs dans le tableau data_test:
+```{r}
+# Étape 1 : extraire les p-values par jour
+jours <- unique(data_mesanges_duree$Jour)
+
+for (j in jours) {
+  # Sous-ensemble des données pour un jour donné
+  df_jour <- subset(data_mesanges_duree, Jour == j)
+  
+  # Effectuer le test Kruskal-Wallis, gérer les erreurs
+  p_val <- kruskal.test(Post_bleue ~ Plage_temps, data = df_jour)$p.value
+  # Nom à rechercher dans data_test
+  condition_name <- paste0("Post_bleue_jour_", j)
+  
+  # Mettre la p-value dans la colonne Variation_intrajour
+  data_test$Variation_intrajour[data_test$Condition == condition_name] <- p_val
+}
+```
+
+### Observation de l'attenuation avant diffusion sur les mésanges bleues détéctées (vues ou entendues) par la suite.
+
+#### Détermination du test à effectuer
+```{r}
+data_mesanges_duree_Pre_bleue <-  data_mesanges_duree %>%
+  filter(Vu_bleue == 1 | Pre_bleue > 0)
+
+ggplot(data_mesanges_duree_Pre_bleue, aes(duree, Pre_bleue, colour = Jour)) +
+  geom_point(show.legend = TRUE) +
+  ylab("Nombre de strophes chantées par\n une mésanges bleue avant diffusion") +
+  xlab("Durée en min") +
+  ggtitle("Attenuation au cours de l'expérience du nombre de strophes") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+```
+
+Pour savoir le type de test à utiliser, on analyse la distribution des résidus. 
+```{r}
+# Création du modèle linéaire et extraction des résidus
+lm4 <- lm(Pre_bleue~Jour,data_mesanges_duree)
+residus4 <- resid(lm4)
+
+# Tracer du graphe comparant la distribution des résidus à une gaussienne
+ggplot(data_mesanges_duree, aes(x = residus4)) +
+  geom_density(fill = "lightgreen", alpha = 0.5) +
+  stat_function(
+    fun = dnorm, 
+    args = list(
+      mean = mean(data_mesanges_duree$Pre_bleue, na.rm = TRUE),
+      sd = sd(data_mesanges_duree$Pre_bleue, na.rm = TRUE)),
+    color = "red",
+    size = 1) +
+  ggtitle("Courbe de densité de nombre de strophes avant diffusion par rapport à une Gaussienne")+
+  xlab("Valeurs de nombre de strophes avant diffusion") +
+  ylab("Densité") +
+  theme(plot.title = element_text(size = 10, hjust = 0.5))
+
+# Test de Shapiro-Wilk pour la normalité
+shapiro.test(residus4)
+```
+On rejette l'hypothèse de normalité. On réalise donc un test non-paramétrique (Kruskal-test) car les observations ne suivent pas une loi normale.
+
+#### Variation inter-journalière des chants pré-diffusion des mésanges bleues.
+```{r}
+kruskal.test(Pre_bleue ~ Jour, data_mesanges_duree)
+data_test$Variation_interjour[13:16] <- kruskal.test(Pre_bleue ~ Jour, data_mesanges_duree)$p.value
+```
+
+#### Variation intra-journalière des chants pré-diffusion des mésanges bleues.
+```{r}
+data_mesanges_duree %>%
+  group_by(Jour) %>%
+  summarise(p_value = kruskal.test(Pre_charbo ~ Plage_temps)$p.value)
+```
+
+Ajout des valeurs dans le tableau data_test:
+```{r}
+# Étape 1 : extraire les p-values par jour
+jours <- unique(data_mesanges_duree$Jour)
+
+for (j in jours) {
+  # Sous-ensemble des données pour un jour donné
+  df_jour <- subset(data_mesanges_duree, Jour == j)
+  
+  # Effectuer le test Kruskal-Wallis, gérer les erreurs
+  p_val <- kruskal.test(Pre_bleue ~ Plage_temps, data = df_jour)$p.value
+  
+  # Nom à rechercher dans data_test
+  condition_name <- paste0("Pre_bleue_jour_", j)
+  
+  # Mettre la p-value dans la colonne Variation_intrajour
+  data_test$Variation_intrajour[data_test$Condition == condition_name] <- p_val
+}
+```
+
+Résultats de tous les tests:
+```{r}
+print(data_test)
+```
+
+**Conclusion : ** La variation intra-jour est significative uniquement dans le jour 3 pour le nombre de chants de charbonnière avant diffusion. Cela pourrait être dû au fait qu'il y ait eu peu de données récoltées ce jour mais qu'elles étaient très variables.
+La variation inter-jour est significative pour le nombre de chants de charbonnière avant diffusion et pour le nombre de chants de bleue après diffusion. Donc il y a une diminution de la réponse des mésanges bleues et une diminution de l'activité des mésanges charbonnières au cours de l'expérience.
+
+## Evolution de la présence des mésanges charbonnières sur le lieu de diffusion.
+
+On s'intéresse maintenant à la présence des mésanges sur le lieu de diffusion. Pour ce faire, on trace l'évolution de la fréquence de présence au cours des jours chez les mésanges charbonnières.
+```{r}
+data_mesanges_duree$Jour <- as.factor(data_mesanges_duree$Jour)
+jours <- unique(data_mesanges_duree$Jour)
+
+# Création d'un data frame qui contiendra les fréquences et nombres de présence par jour
+data_frequence <- data.frame(
+  Jour = jours,
+  N_presence = numeric(length(jours)),
+  N_absence = numeric(length(jours)),
+  Frequence_presence = numeric(length(jours)),
+  Frequence_absence = numeric(length(jours)))
+
+# Correction du jour 3 puisqu'il n'y a eu qu'une demie journée d'échantillonnage.
+for (k in seq_along(jours)) {
+    j <- jours[k]
+    df_jour <- subset(data_mesanges_duree, Jour == j)
+    N_passage_jour <- max(df_jour$Nombre_passage)
+    if (k==3) {
+      N_pres <- 2*sum(df_jour$Vu_charbo == 1, na.rm = TRUE)
+      N_total <- nrow(df_jour)}
+    else {
+      N_pres <- sum(df_jour$Vu_charbo == 1, na.rm = TRUE)
+      N_total <- nrow(df_jour)}
+    
+# Remplissage du tableau
+  data_frequence$N_presence[k] <- N_pres
+  data_frequence$N_absence[k] <- N_total - N_pres
+  data_frequence$Frequence_presence[k] <- N_pres / N_total
+  data_frequence$Frequence_absence[k] <- 1 - (N_pres / N_total)}
+
+# Histogramme
+ggplot(data_frequence, aes(x = Jour, y=Frequence_presence, fill= Jour)) +
+  geom_bar(stat="identity", color="black") +
+  ggtitle( "Fréquence de la présence des mésanges charbonnières\n (vues) au cours des jours") +
+  xlab("Jour") +
+  ylab("Fréquence des présences\n des mésanges charbonnières") +
+  scale_fill_manual(values = c("1" = "#00CD00", "2" = "hotpink2", "3" = "#EE2C2C", "4" = "#00BFFF"))
+```
+
+On fait un test d'indépendance du chi2 pour voir si il y a une relation entre la présence des mésanges charbonnières et le jour d'échantillonnage. L'hypothèse nulle est qu'il n'y a pas de relation entre la présence des mésanges et le jour.
+```{r}
+tableau = matrix(c(data_frequence$N_presence, data_frequence$N_absence), 2, 4, byrow=T) 
+khi_test = chisq.test(tableau)
+khi_test
+```
+On peut donc dire qu'il n'y a pas de relation entre la présence des oiseaux et le jour de l'expérience. La présence de l'oiseau ne dépend pas du jour. 
+
+On peut essayer de modéliser la probabilité de présence d'une mésange charbonnière en fonction du jour avec un modèle linéaire généralisé pour pouvoir observer les  effets de chaque jour indépendament, qui ne sont peut-être pas observables uniquement avec un test du chi2, sur la probabilité d'observer une mésange charbonnière.
+```{r}
+modele_presence <- glm(Vu_charbo ~ Jour, data = data_mesanges_duree, family = "binomial")
+summary(modele_presence)
+```
+On ne détecte pas de variation significative de la probabilité de présence selon le jour. 
+
+**Conclusion :** Il n'y a pas d'attenuation dans la présence des mésanges charbonnières au cours de l'expérience.
+
+## Recherche d'un effet d'atténuation dans les latences d'approches
+
+### Détermination du type de test à utiliser.
+
+Création d'un data-frame prenant pour chaque diffusion le type de chant diffusé, les latences d'approches et de chants des deux espèces ainsi que le nombre de diffusion réalisée auprès de l'oiseau.
+```{r}
+df_latence <- data_mesanges_modifiee %>% select(c("Latence_approche_charbo", "Latence_chant_charbo", "Latence_approche_bleue", "Latence_chant_bleue"))
+
+df_latence <- as.data.frame(bind_cols(data_mesanges_modifiee["Jour"], data_mesanges_duree["duree"], data_mesanges_modifiee["Nombre_passage"], data_mesanges_modifiee["Son"], sweep (df_latence, 2, 60, "-")))
+```
+
+On s'intéresse aux reactions, pour voir si l'oiseau prend plus ou moins longtemps à réagir.
+Pour ce faire, on visualise déjà les données étudiées.
+```{r}
+box_lat_app_charbo <- ggplot(df_latence, aes(x = Jour, y = Latence_approche_charbo)) +
+  geom_boxplot() +
+  xlab("Jour") +
+  ylab("Latence de l'approche (sec)") +
+  ggtitle("Approche charbo")
+
+box_lat_chant_charbo <- ggplot(df_latence, aes(x = Jour, y = Latence_chant_charbo)) +
+  geom_boxplot() +
+  xlab("Jour") +
+  ylab("Latence du chant (en sec)") +
+  ggtitle("Chant charbo")
+
+box_lat_app_bleue <- ggplot(df_latence, aes(x = Jour, y = Latence_approche_bleue)) +
+  geom_boxplot() +
+  xlab("Jour") +
+  ylab("Latence de l'approche (en sec)") +
+  ggtitle("Approche bleues")
+
+box_lat_chant_bleue <- ggplot(df_latence, aes(x = Jour, y = Latence_chant_bleue)) +
+  geom_boxplot() +
+  xlab("Jour") +
+  ylab("Latence du chant (en sec)") +
+  ggtitle("Chant bleues")
+
+ggarrange(box_lat_app_charbo, box_lat_chant_charbo, box_lat_app_bleue, box_lat_chant_bleue,
+          ncol = 2, nrow = 2)
+
+point_lat_app_charbo <- ggplot(df_latence, aes(x = duree, y = Latence_approche_charbo, colour = Jour)) +
+  geom_point() +
+  xlab("Minutes depuis le debut\n des observations") +
+  ylab("Latence du chant\n  (en sec)") +
+  ggtitle("Approche charbo")
+
+point_lat_chant_charbo <- ggplot(df_latence, aes(x = duree, y = Latence_chant_charbo, colour = Jour)) +
+  geom_point() +
+  xlab("Minutes depuis le debut\n des observations") +
+  ylab("Latence du chant\n  (en sec)") +
+  ggtitle("Chant charbo")
+
+point_lat_app_bleue <- ggplot(df_latence, aes(x = duree, y = Latence_approche_bleue, colour = Jour)) +
+  geom_point() +
+  xlab("Minutes depuis le debut\n des observations") +
+  ylab("Latence du chant\n  (en sec)") +
+  ggtitle("Approche bleues")
+
+point_lat_chant_bleue <- ggplot(df_latence, aes(x = duree, y = Latence_chant_bleue, colour = Jour)) +
+  geom_point() +
+  xlab("Minutes depuis le debut\n des observations") +
+  ylab("Latence du chant\n  (en sec)") +
+  ggtitle("Chant bleues")
+
+ggarrange(point_lat_app_charbo, point_lat_chant_charbo, point_lat_app_bleue, point_lat_chant_bleue,
+          ncol = 2, nrow = 2)
+```
+
+Puis, on cherche à connaître la distribution des valeurs, pour choisir le test à réaliser.
+```{r}
+hist(df_latence$Latence_chant_charbo, main="Distribution des latences de chants\n (lorsque la mésange a chanté)", xlab="Latence du chant (en secondes)", ylab="Occurence")
+shapiro.test(df_latence$Latence_chant_charbo) # on rejette l'hypothese d'une distribution normale
+```
+On rejette l'hypothèse d'un distribution noramle. On réalise alors des tests de Wilcoxon.
+
+## Analyse de la latence en fonction du jour
+```{r}
+WT_app_charbo_J <- wilcox_test(data = df_latence, formula = Latence_approche_charbo ~ Jour)
+WT_chant_charbo_J <- wilcox_test(data = df_latence, formula = Latence_chant_charbo ~ Jour)
+WT_app_bleue_J <- wilcox_test(data = df_latence, formula = Latence_approche_bleue ~ Jour)
+WT_chant_bleue_J <- wilcox_test(data = df_latence, formula = Latence_chant_bleue ~ Jour)
+
+WT_app_charbo_J
+WT_chant_charbo_J
+WT_app_bleue_J
+WT_chant_bleue_J
+```
+L'ensemble des tests montrent une abscence de changements significatifs des latences en fonction des jours. Ainsi, les oiseaux n'arrivent ni ne chantent plus tard lorsque les jours passent (comme nous le pensions initialement), lorsqu'il vient. 
+
+## Analyse de la latence en fonction du son passe
+```{r}
+WT_app_charbo_Son <- wilcox_test(data = df_latence, formula = Latence_approche_charbo ~ Son)
+WT_chant_charbo_Son <- wilcox_test(data = df_latence, formula = Latence_chant_charbo ~ Son)
+WT_app_bleue_Son <- wilcox_test(data = df_latence, formula = Latence_approche_bleue ~ Son)
+WT_chant_bleue_Son <- wilcox_test(data = df_latence, formula = Latence_chant_bleue ~ Son)
+
+WT_app_charbo_Son
+WT_chant_charbo_Son
+WT_app_bleue_Son
+WT_chant_bleue_Son
+```
+Il n'y a pas de variation significatives des latences en fonction du chant diffusé.
+
+## Analyse de la latence en fonction de l'heure de la journee
+```{r}
+df_latence$Plage_temps <- data_mesanges_duree$Plage_temps
+
+WT_app_charbo_Plage_temps <- wilcox_test(data = df_latence, formula = Latence_approche_charbo ~ Plage_temps)
+WT_chant_charbo_Plage_temps <- wilcox_test(data = df_latence, formula = Latence_chant_charbo ~ Plage_temps)
+WT_app_bleue_Plage_temps <- wilcox_test(data = df_latence, formula = Latence_approche_bleue ~ Plage_temps)
+WT_chant_bleue_Plage_temps <- wilcox_test(data = df_latence, formula = Latence_chant_bleue ~ Plage_temps)
+
+WT_app_charbo_Plage_temps
+WT_chant_charbo_Plage_temps
+WT_app_bleue_Plage_temps
+WT_chant_bleue_Plage_temps
+```
+La non plus, on n'observe pas de différences significatives entre les latences en fonction de l'heure de la journée.
+
+**Conclusion :** Non seulement les mésanges ne venait pas moins les derniers jours, mais elles ne semblent pas non plus être arrivée plus tard, ni avoir chanté plus tard.
+De plus, ces latences ne dépendent pas non plus du chant diffusé, les mésanges étant donc aussi réactives à chaque chant. Enfin, d'après nos relevés, l'heure de la journée n'a pas eu d'impact sur leur réactivité.
+
+\newpage
+# Modélisation de la réponse des mésanges
+
+Nous allons utiliser un modèle linéaire généralisé pour modéliser la réponse des mésanges. Puisque la réponse des mésanges est quantifiée en terme de comptages, nous avons pensé à utiliser un glm de type poisson. \\
+Nous cherchons à tester la surdispersion des données afin de déterminer s’il est pertinent d’utiliser une distribution de Poisson dans nos modèles linéaires généralisés, ou s’il serait préférable d’opter pour une distribution adaptée à une surdispersion, comme celle du quasi-Poisson. Ce test est effectué sur un paramètre explicatif, ici le son diffusé. \\
+On va donc chercher à estimer la déviance qui permet d'évaluer la qualité de l'ajustement. 
+
+Le rapport suivant permet de tester la surdispersion: \\
+Déviance résiduelle / Degrés de liberté résiduelle \\
+Si ce rapport est proche de 1 il n'y a pas de surdispersion, on peut utiliser un modèle de Poisson. \\
+Si ce rapport est supérieur à 1, la surdispersion est probable, il est préférable d'envisager un modèle quasi-Poisson ou négatif binomial.
+
+Modèle linéaire généralisés à une seule variable explicative
+```{r}
+glm_intensite <- glm(somme_charbo_post ~ Son,
+                     family = poisson,
+                     data = data_mesanges_verlan_filtre)
+summary(glm_intensite)
+DescTools::PseudoR2(glm_intensite, which = "all")
+```
+McFadden est un pseudo-R2 qui est très utilisé. Ici, il vaut 0,094 ce qui ets inférieur à 0,2 ce qui signifie que le modèle n'est pas très explicatif de la variabilité des données. 
+
+```{r}
+surdispersion <- deviance(glm_intensite) / df.residual(glm_intensite)
+surdispersion
+```
+
+Il existe un test plus formel pour la surdispersion
+```{r}
+dispersiontest(glm_intensite)
+```
+Une surdispersion est bien détectée.
+On utilisera donc une distribution quasi-poisson qui devrait donc être plus appropriée pour les données.
+
+Modelisation de la réponse des mésanges charbonnières avec une distribution quasi-poisson
+```{r}
+#convertir les NA en valeur max de latence >360. On fixe de manière aribitraire ce temps à 361.
+data_m <- data_mesanges_modifiee
+for (i in 1:nrow(data_mesanges_modifiee)){
+  if (is.na(data_mesanges_modifiee$Latence_approche_charbo[i])){
+    data_m$Latence_approche_charbo[i] <- 361}}
+```
+
+Pour construire le modèle, on applique la méthode "bottom-up" en partant de l'effet le plus explicatif de la variabilité des données et en ajoutant au fur et à mesure, un par un, les effets explicatifs dans l'ordre de leur pouvoir explicatif. On compare les modèles complexifiés au fur et à mesure en utilisant une anova et en ne conservant que les effets qui diminuent significativement la déviance résiduelle.
+
+Les paramètres sont classés selon leur pouvoir explicatif en comparant la déviance résiduelle.
+
+```{r}
+#Effet 2
+c0 <- glm(somme_charbo_post ~Vu_charbo, family="quasipoisson", data=data_m)
+print("Residual Deviance: 1322")
+```
+```{r}
+#Effet 1
+c1 <- glm(somme_charbo_post ~as.numeric(Latence_approche_charbo), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1313")
+```
+```{r}
+#Effet 6
+c2 <- glm(somme_charbo_post ~as.numeric(Pluie), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1571")
+```
+```{r}
+#Effet 3
+c3 <- glm(somme_charbo_post ~Son, family="quasipoisson", data=data_m)
+print("Residual Deviance: 1363 ")
+```
+```{r}
+#Effet 5
+c4 <- glm(somme_charbo_post ~as.numeric(Nombre_passage), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1565")
+```
+```{r}
+#Effet 8
+c5 <- glm(somme_charbo_post ~as.numeric(Ensoleillement), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1585 ")
+```
+```{r}
+#Effet 9
+c6 <- glm(somme_charbo_post ~as.numeric(Temperature), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1587 ")
+```
+```{r}
+#Effet 4
+c7 <- glm(somme_charbo_post ~as.numeric(Vent), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1555 ")
+```
+
+```{r}
+#Effet 7
+c8 <- glm(somme_charbo_post ~as.numeric(Jour), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1572 ")
+```
+```{r}
+c9 <- glm(somme_charbo_post ~Vu_charbo+as.numeric(Latence_approche_charbo), family="quasipoisson", data=data_m)
+
+anova(c1,c9,test="F")
+```
+Significatif, l'effet 2 est ajouté.
+
+```{r}
+c9_1 <- glm(somme_charbo_post ~Vu_charbo+as.numeric(Latence_approche_charbo)+Son, family="quasipoisson", data=data_m, 
+            control = glm.control(maxit = 100, epsilon = 1e-8))
+
+anova(c9,c9_1,test="F")
+```
+Pas Significatif : on supprime l'effet 3.
+
+```{r}
+c9_2 <- glm(somme_charbo_post ~Vu_charbo+as.numeric(Latence_approche_charbo)+as.numeric(Vent), family="quasipoisson", data=data_m, 
+            control = glm.control(maxit = 100, epsilon = 1e-8))
+
+anova(c9,c9_2,test="F")
+```
+Pas significatif:on supprime l'effet 4
+
+```{r}
+c9_3 <- glm(somme_charbo_post ~Vu_charbo + as.numeric(Latence_approche_charbo)+as.numeric(Nombre_passage), family="quasipoisson", data=data_m, 
+            control = glm.control(maxit = 100, epsilon = 1e-8))
+
+anova(c9,c9_3,test="F")
+```
+Pas significatif:on supprime l'effet 5
+
+```{r}
+c9_4 <- glm(somme_charbo_post ~Vu_charbo + as.numeric(Latence_approche_charbo)+ as.numeric(Pluie), family="quasipoisson", data=data_m, 
+            control = glm.control(maxit = 100, epsilon = 1e-8))
+
+anova(c9,c9_4,test="F")
+```
+Pas Significatif : on supprime l'effet 6
+
+```{r}
+c9_5 <- glm(somme_charbo_post ~Vu_charbo + as.numeric(Latence_approche_charbo)+as.numeric(Jour), family="quasipoisson", data=data_m, 
+            control = glm.control(maxit = 100, epsilon = 1e-8))
+
+anova(c9,c9_5,test="F")
+```
+Pas significatif:on supprime l'effet 7
+
+```{r}
+c9_6 <- glm(somme_charbo_post ~Vu_charbo + as.numeric(Latence_approche_charbo)+as.numeric(Ensoleillement) , family="quasipoisson", data=data_m, 
+            control = glm.control(maxit = 100, epsilon = 1e-8))
+
+anova(c9,c9_6,test="F")
+```
+Pas significatif:on supprime l'effet 8
+
+```{r}
+c9_7<- glm(somme_charbo_post ~Vu_charbo + as.numeric(Latence_approche_charbo)+ as.numeric(Temperature), family="quasipoisson", data=data_m, 
+            control = glm.control(maxit = 100, epsilon = 1e-8))
+
+anova(c9,c9_7,test="F")
+```
+Pas significatif : on supprime l'effet 9
+
+Ainsi, on modèlise la réponse des mésanges charbonnières en fonction de Latence_approche_charbo+ Vu_charbo 
+
+Modelisation : 
+Pour représenter ce modèle, on corrige d'abord la latence, qui incluait le temps pre diffusion, en enlevant la première minute pré diffusion.
+```{r}
+data_m$Latence_approche_charbo_corrigée <- as.numeric(data_m$Latence_approche_charbo) - 61
+```
+
+
+```{r}
+modele_charbo <- glm(somme_charbo_post ~Vu_charbo+as.numeric(Latence_approche_charbo_corrigée), family="quasipoisson", data=data_m, 
+            control = glm.control(maxit = 100, epsilon = 1e-8))
+modele_charbo
+```
+
+Nous souhaitons représenter le modèle de la réponse des mésanges charbonnières. Puisque le paramètre Vu_charbo est binaire, et la Latence d'approche est discrète, il est préférable de représenter la réponse en fonction de la latence et de distinguer ensuite Vu_charbo.
+```{r}
+# Création d'un dataframe pour les prédictions, on créer des données d'entrée qui appartiennent au même intervalle que les données brutes.
+new_data <- expand.grid(
+  Latence_approche_charbo_corrigée = seq(0, 400,
+                                length.out = 100),
+  Vu_charbo = c(0, 1)
+)
+
+# Prédictions avec le modèle
+new_data$prediction <- predict(modele_charbo, newdata = new_data, type = "response")
+
+# Prédictions avec intervalles de confiance
+predictions <- predict(modele_charbo, newdata = new_data, type = "link", se.fit = TRUE)
+
+# Transformation du lien vers la réponse (fonction réciproque du lien log)
+new_data$fit <- exp(predictions$fit)
+new_data$lower <- exp(predictions$fit - 1.96 * predictions$se.fit)
+new_data$upper <- exp(predictions$fit + 1.96 * predictions$se.fit)
+
+# Tracé du graphique
+ggplot(data_m, aes(x = as.numeric(Latence_approche_charbo_corrigée), 
+                   y = Post_2 + Post_3))+
+  geom_point()+
+  geom_line(data = new_data, aes(x = as.numeric(Latence_approche_charbo_corrigée), 
+                                 y = prediction, 
+                                 color = factor(Vu_charbo)), size = 1) +
+ geom_ribbon(data = new_data, 
+              aes(x = as.numeric(Latence_approche_charbo_corrigée), ymin = lower, ymax = upper, fill = factor(Vu_charbo)), 
+              alpha = 0.2, inherit.aes = FALSE, show.legend = FALSE) +
+  labs(
+    title = "Modèle prédictif de la réponse des mésanges charbonnières selon leur temps d'approche et leur présence",
+    x = "Latence d'approche (s)",
+    y = "Nombre de strophes post diffusion",
+    color = "Présence de la mésange charbonnière"
+  )
+
+```
+
+Si on veut prendre en compte l'interaction entre le temps d'approche à la présence des mésanges, on modifie le modèle en changeant la combinaison des paramètres explicatifs ( x au lieu de +)
+```{r}
+modele_charboX <- glm(Post_2+Post_3 ~Vu_charbo*as.numeric(Latence_approche_charbo_corrigée), family="quasipoisson", data=data_m, 
+            control = glm.control(maxit = 100, epsilon = 1e-8))
+modele_charboX
+```
+
+Nous souhaitons représenter le modèle de la réponse des mésanges charbonnières. 
+```{r}
+# Création d'un dataframe pour les prédictions
+new_data <- expand.grid(
+  Latence_approche_charbo_corrigée = seq(0, 400,
+                                length.out = 100),
+  Vu_charbo = c(0, 1)
+)
+
+# Prédictions avec le modèle
+new_data$prediction <- predict(modele_charboX, newdata = new_data, type = "response")
+
+# Prédictions avec intervalles de confiance
+predictions <- predict(modele_charboX, newdata = new_data, type = "link", se.fit = TRUE)
+
+# Transformation du lien vers la réponse (inverse du lien log)
+new_data$fit <- exp(predictions$fit)
+new_data$lower <- exp(predictions$fit - 1.96 * predictions$se.fit)
+new_data$upper <- exp(predictions$fit + 1.96 * predictions$se.fit)
+
+
+# Tracé du graphique
+ggplot(data_m, aes(x = as.numeric(Latence_approche_charbo_corrigée), 
+                   y = Post_2 + Post_3))+
+  geom_point()+
+  geom_line(data = new_data, aes(x = as.numeric(Latence_approche_charbo_corrigée), 
+                                 y = prediction, 
+                                 color = factor(Vu_charbo)), size = 1) +
+ geom_ribbon(data = new_data, 
+              aes(x = as.numeric(Latence_approche_charbo_corrigée), ymin = lower, ymax = upper, fill = factor(Vu_charbo)), 
+              alpha = 0.2, inherit.aes = FALSE,show.legend = FALSE) +
+  labs(
+    title = "Modèle prédictif de la réponse des mésanges charbonnières selon l'intéraction entre leur temps d'approche et leur présence" ,
+    x = "Latence d'approche (s)",
+    y = "Nombre de strophes post diffusion",
+    color = "Présence de la mésange charbonnière"
+  )
+
+```

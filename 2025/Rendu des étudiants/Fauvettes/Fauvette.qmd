@@ -1,0 +1,1694 @@
+---
+title: "Fauvette"
+author: "Les Guignols à Gerland"
+format: 
+  html:
+    toc: true  # pour activer la table des matières
+    toc-depth: 2  # profondeur des titres
+    toc-location: left
+editor: visual
+---
+
+# Préambule : Importation des données
+
+Les données récoltées sur le terrain ainsi que les données météo obtenues de la station de l'ENS sur infoclimat.fr ont été converties en format csv. On veut maintenant les importer et rendre les données compatibles entre les deux dataframes.
+
+On commence par importer les librairies.
+
+```{r}
+#| message: false
+#| warning: false
+
+library(readxl)
+library(tidyverse)
+library(FactoMineR)
+library(factoextra)
+library(corrplot)
+library(ade4)
+library(adegraphics)
+library(patchwork)
+library(viridis)
+library(plotly)
+library(dplyr)
+library(here)
+library(ggsignif)
+library(rstatix)
+library(performance)
+library(Hmisc)
+library(emmeans)
+```
+
+On importe les données du terrain
+
+```{r}
+fauvette <- read.csv("Les Guignols à Gerland.csv", sep = ";", header = TRUE, encoding = "UTF-8")
+```
+
+On importe les données météo
+
+```{r}
+#| include: false
+meteo <- read_csv2("export_infoclimat.csv", locale = locale(encoding = "UTF-8"))
+meteo <- meteo[-1, ] #on enleve la première ligne qui contient les unités
+
+```
+
+On rend les data frame compatibles via la colonne date
+
+```{r}
+#convertie la date en format lisible par R
+meteo <- meteo %>%
+  mutate(dh_utc = trimws(dh_utc),
+         dh_utc = dmy_hm(dh_utc))         
+
+#crée une colonne jour et minute.AM pour permettre de lier les tableaux
+meteo <- meteo %>%
+  mutate(
+    date_seule = as_date(dh_utc),                            
+    jour = as.integer(factor(date_seule))                   
+  ) %>%
+  mutate(
+    minute.AM = hour(dh_utc) * 60 + minute(dh_utc) 
+  )
+
+fauvette <- fauvette %>%
+  mutate(type_diff = gsub("[0-9_]", "", diff))
+
+
+#on rajoute une colonne dh_utc à fauvette pour encore mieux lier fauvette et météo
+
+# Date de départ pour le jour 1
+date_depart <- as.Date("2025-04-14")
+
+# Ajout de la colonne dh_utc et dh_utc_arrondie
+fauvette <- fauvette %>%
+  mutate(
+    dh_utc = as.POSIXct(date_depart + days(Jour - 1)) + minutes(Minute.AM),
+    dh_utc_arrondi = round_date(dh_utc, unit = "10 minutes"),
+  )
+
+rm(date_depart)
+
+#met les données au bon format
+fauvette <- fauvette %>% mutate(
+  Jour = as.numeric(Jour),
+  Minute.AM = as.numeric(Minute.AM),
+  ID_male = as.numeric(ID_male),
+  vu = as.numeric(vu),
+  str_pre = as.numeric(str_pre),
+  d_min = as.numeric(d_min),
+  latence..en.s. = as.numeric(latence..en.s.),
+  str_diff = as.numeric(str_diff),
+  str_post_diff = as.numeric(str_post_diff),
+  cris_toto = as.numeric(cris_toto),
+  cris_pre = as.numeric(cris_pre),
+  cris_diff= as.numeric(cris_diff),
+  cris_post = as.numeric(cris_post),
+  survols = as.numeric(survols),
+  femelle = as.numeric(femelle),
+)
+
+meteo <- meteo %>% mutate(
+  temperature = as.numeric(temperature),
+  pression = as.numeric(pression),
+  pression_variation_3h = as.numeric(pression_variation_3h),
+  humidite = as.numeric(humidite),
+  point_de_rosee = as.numeric(point_de_rosee),
+  visibilite = as.numeric(visibilite),
+  vent_moyen = as.numeric(vent_moyen),
+  vent_rafales = as.numeric(vent_rafales),
+  vent_rafales_10min = as.numeric(vent_rafales_10min),
+  vent_direction = as.numeric(vent_direction),
+  temperature_min = as.numeric(temperature_min),
+  temperature_max = as.numeric(temperature_max),
+  pluie_1h = as.numeric(pluie_1h),
+  pluie_3h = as.numeric(pluie_3h),
+  pluie_6h = as.numeric(pluie_6h),
+  pluie_12h = as.numeric(pluie_6h),
+  pluie_24h = as.numeric(pluie_24h),
+  pluie_cumul_0h = as.numeric(pluie_cumul_0h),
+  pluie_intensite = as.numeric(pluie_intensite),
+  pluie_intensite_max_1h = as.numeric(pluie_intensite_max_1h),
+  uv = as.numeric(uv),
+  uv_index = as.numeric(uv_index),
+  ensoleillement = as.numeric(ensoleillement),
+  temperature_sol = as.numeric(temperature_sol),
+  jour = as.numeric(jour),
+  minute.AM = as.numeric(minute.AM)
+)
+
+#enleve les colonnes avec des NA dans méteo et on choisit uniquement les données métérologiques
+donne <- fauvette %>% left_join(meteo, by = c("dh_utc_arrondi" = "dh_utc"))
+donne <- donne %>% select(-c(temperature_sol, ensoleillement, pluie_12h, vent_rafales, visibilite))
+meteo_sansNA <- meteo %>% select(-c(temperature_sol, ensoleillement, pluie_12h, vent_rafales, visibilite))
+meteo_sansNA <- meteo_sansNA[, colSums(is.na(meteo_sansNA)) == 0]
+meteo_uniquement_meterologique <- meteo_sansNA %>% select(-c(jour, minute.AM))
+
+```
+
+### Estimation des données absentes pour les cris
+
+Le premier jour nous n'avions pas séparer les cris, on a donc estimé le détail des cris par rapport aux proportions des cris de tout le jeu de données (en prenant en compte le type de diffusion). Attention, les estimations provenant de moyennes perdent la variabilité des résultats, il faut donc en prendre compte lors de l'analyse.
+
+Sifflements : Avant-diffusion : 0% Pendant 53.8% Après 46.2%
+
+Jardin : 24.82% 35.6% 39.58%
+
+Grisette : 23.4% 57.16% 19.45%
+
+Témoin : 0% 50% 50%
+
+Gazouillis : 3.05% 62.25% 34.7%
+
+Connaissant les cris totaux et les proportions moyennes on peut calculer le détail.
+
+```{r}
+# création d'un nouveau tableau
+donne_estim<-donne
+
+# remplissage des estimations
+donne_estim$cris_pre[1]<-1
+donne_estim$cris_pre[2]<-0
+donne_estim$cris_pre[3]<-0
+donne_estim$cris_pre[4]<-1
+donne_estim$cris_pre[5]<-9
+donne_estim$cris_pre[6]<-0
+donne_estim$cris_pre[7]<-0
+donne_estim$cris_pre[9]<-1
+donne_estim$cris_pre[11]<-0
+donne_estim$cris_pre[12]<-1
+donne_estim$cris_pre[13]<-0
+
+donne_estim$cris_diff[1]<-21
+donne_estim$cris_diff[2]<-9
+donne_estim$cris_diff[3]<-21
+donne_estim$cris_diff[4]<-2
+donne_estim$cris_diff[5]<-14
+donne_estim$cris_diff[6]<-36
+donne_estim$cris_diff[7]<-3
+donne_estim$cris_diff[9]<-23
+donne_estim$cris_diff[11]<-14
+donne_estim$cris_diff[12]<-1
+donne_estim$cris_diff[13]<-27
+  
+donne_estim$cris_post[1]<-12
+donne_estim$cris_post[2]<-7
+donne_estim$cris_post[3]<-21
+donne_estim$cris_post[4]<-1
+donne_estim$cris_post[5]<-15
+donne_estim$cris_post[6]<-36
+donne_estim$cris_post[7]<-2
+donne_estim$cris_post[9]<-13
+donne_estim$cris_post[11]<-12
+donne_estim$cris_post[12]<-1
+donne_estim$cris_post[13]<-23
+
+```
+
+On repare le jeux de données fauvette et on sélectionne uniquement les paramètres comportementaux
+
+```{r}
+donne_estim <- readRDS("données_estim.rds")
+fauvette <- fauvette %>% mutate(cris_post = donne_estim$cris_post,
+                           cris_pre = donne_estim$cris_pre,
+                           cris_diff = donne_estim$cris_diff,
+                           cris_toto = donne_estim$cris_toto)
+fauvette <- fauvette %>% mutate(d_min = ifelse(is.na(d_min), 4, d_min))
+fauvette <- fauvette %>% mutate(latence..en.s. = ifelse(latence..en.s. == 0, 240, latence..en.s.))
+
+fauvette_uniquement_comportementale <- fauvette %>% select(-c(ID_male, Jour, Minute.AM))
+```
+
+# I. Analyse en composante principale
+
+## I.1. Regroupement de variables corrélées en indices
+
+### Analyse des données météorologique
+
+On commence par faire une ACP sur les données météorologiques
+
+```{r}
+df_numeric_m <- meteo_uniquement_meterologique[sapply(meteo_uniquement_meterologique, is.numeric)]
+
+res_acp_m <- PCA(df_numeric_m, scale.unit = TRUE, graph = FALSE)
+fviz_pca_var(res_acp_m,
+             col.var = "contrib", # colorer selon la contribution
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+```
+
+On récupère les dimensions expliquant la plus haute proportion de la variance du jeu de données. On prend les dimensions expliquant minimum 10% de la variance.
+
+```{r}
+fviz_screeplot(res_acp_m, addlabels = TRUE, ylim = c(0, 50))
+```
+
+On regarde les variables contribuant aux dimensions 1, 2 et 3 sélectionnées.
+
+```{r}
+c_m1 <- fviz_contrib(res_acp_m, choice = "var", axes = 1, top = 10) +
+  labs(title = "Dim.1")
+c_m2 <- fviz_contrib(res_acp_m, choice = "var", axes = 2, top = 10) +
+  labs(title = "Dim.2")
+c_m3 <- fviz_contrib(res_acp_m, choice = "var", axes = 3, top = 10) +
+  labs(title = "Dim.3")
+
+(c_m1 | c_m2 | c_m3) + plot_layout(axes = 'collect')
+```
+
+La température, le vent et l'humidité contribuent le plus à dimension 1. Les données de pluviométrie contribuent le plus à la dimension 2. Les données d'ensoleillement contribuent le plus à la dimension 3.
+
+On récupère ensuite les coordonnées de chaque observation sur ces trois dimensions. On a donc 3 indices météorologiques différents.
+
+```{r}
+#on recupere les dimensions 1, 2, 3 de l'acp de meteo
+donne_meteo <- res_acp_m$ind$coord
+donne_meteo <- as.data.frame(donne_meteo)
+donne_meteo <- donne_meteo %>% select(-c(Dim.4, Dim.5))
+donne_meteo <- rename(donne_meteo, temperature_vent_humidite = Dim.1)
+donne_meteo <- rename(donne_meteo, pluie = Dim.2)
+donne_meteo <- rename(donne_meteo, ensoleillement = Dim.3)
+donne_meteo <- bind_cols(donne_meteo, meteo$dh_utc)
+donne_meteo <- rename(donne_meteo, dh_utc = ...4)
+#saveRDS(donne_meteo, file = "output/donne_meteo.rds")
+```
+
+### Analyse des données comportementales
+
+On essaie maintenant de regrouper des données comportementales en différents indices.
+
+```{r}
+df_numeric_f <- fauvette_uniquement_comportementale[sapply(fauvette_uniquement_comportementale, is.numeric)]
+
+res_acp_f <- PCA(df_numeric_f, scale.unit = TRUE, graph = FALSE)
+fviz_pca_var(res_acp_f,
+             col.var = "contrib", # colorer selon la contribution
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+```
+
+On recupère les dimensions expliquant la plus haute proportion de la variance du jeu de données. On prend les dimensions expliquant le plus de variance
+
+```{r}
+fviz_screeplot(res_acp_f, addlabels = TRUE, ylim = c(0, 50))
+```
+
+On regarde la structuration des données.
+
+```{r}
+fviz_pca_biplot(res_acp_f, geom = 'point', axes= c(1,2), repel = TRUE,
+                col.var = "#FC4E07", col.ind = "#00AFBB")
+```
+
+Pour cela, on regarde s'il y a une structure entre les dimensions 3 et 4.
+
+```{r}
+fviz_pca_biplot(res_acp_f, geom = 'point', axes= c(3,4), repel = TRUE,
+                col.var = "#FC4E07", col.ind = "#00AFBB")
+```
+
+On observe pas un nuage de point circulaire, on observe une structure, on garde donc la dimension 4.
+
+De nouveau, on regarde les variables contribuant aux dimensions sélectionnées.
+
+```{r}
+c_f1 <- fviz_contrib(res_acp_f, choice = "var", axes = 1, top = 10) +
+  labs(title = "Dim.1")
+c_f2 <- fviz_contrib(res_acp_f, choice = "var", axes = 2, top = 10)  +
+  labs(title = "Dim.2")
+c_f3 <- fviz_contrib(res_acp_f, choice = "var", axes = 3, top = 10) +
+  labs(title = "Dim.3")
+c_f4 <- fviz_contrib(res_acp_f, choice = "var", axes = 4, top = 10) +
+  labs(title = "Dim.4")
+
+
+(c_f1 | c_f2 | c_f3 | c_f4) + plot_layout(axes = 'collect')
+```
+
+La distance, la latence, les strophes pendant la diffusion et le survol contribuent le plus à dimension 1. Les cris pré-diffusion contribuent le plus à la dimension 2. Les cris post-diffusion, les strophes pendant la diffusion et l'observation de la femelle contribuent le plus à la dimension 3. Les cris pendant la diffusion et les apparitions mâles contribuent le plus à la dimension 4.
+
+On récupère ensuite les coordonnées de chaque observation sur ces quatres dimensions. On a donc 4 indices comportementaux différents. On utilisera surtout l'indice obtenu à partir des coordonnées de la dimension 1 comme indice d'activité principal.
+
+```{r}
+#on recupere les dimensions 1, 2, 3, 4 de l'acp de fauvette
+donne_fauvette <- res_acp_f$ind$coord
+donne_fauvette <- as.data.frame(donne_fauvette)
+donne_fauvette <- donne_fauvette %>% select(-c(Dim.5))
+donne_fauvette <- rename(donne_fauvette, dist_lat_strophe_survol = Dim.1)
+donne_fauvette <- rename(donne_fauvette, cris_pre = Dim.2)
+donne_fauvette <- rename(donne_fauvette, cris_post_stroph_femelle = Dim.3)
+donne_fauvette <- rename(donne_fauvette, cris_diff_apparition = Dim.4)
+donne_fauvette <- bind_cols(donne_fauvette, fauvette$dh_utc_arrondi)
+donne_fauvette <- rename(donne_fauvette, dh_utc_arrondi = ...5)
+#saveRDS(donne_fauvette, file = "output/donne_fauvette.rds")
+```
+
+On crée un nouveau data frame complet avec nos indices obtenus à partir des ACP pour les paramètres métérologiques et comportementaux et on rajoute les paramètres suivants : l'ID du mâle, les diffusions, l'heure et le jour.
+
+```{r}
+donne_fauvette_meteo <- donne_fauvette %>% left_join(donne_meteo, by = c("dh_utc_arrondi" = "dh_utc"))
+
+donne_fauvette_meteo <- bind_cols(donne_fauvette_meteo, fauvette$ID_male)
+donne_fauvette_meteo <- bind_cols(donne_fauvette_meteo, fauvette$Jour)
+donne_fauvette_meteo <- bind_cols(donne_fauvette_meteo, fauvette$Minute.AM)
+donne_fauvette_meteo <- rename(donne_fauvette_meteo, ID_male = ...9)
+donne_fauvette_meteo <- rename(donne_fauvette_meteo, Jour = ...10)
+donne_fauvette_meteo <- rename(donne_fauvette_meteo, Minute.AM = ...11)
+donne_fauvette_meteo <- donne_fauvette_meteo %>% mutate(ID_male = as.factor(ID_male))
+
+donne_fauvette_meteo <- bind_cols(donne_fauvette_meteo, fauvette$diff)
+donne_fauvette_meteo <- bind_cols(donne_fauvette_meteo, fauvette$type_diff)
+donne_fauvette_meteo <- rename(donne_fauvette_meteo, diff = ...12)
+donne_fauvette_meteo <- rename(donne_fauvette_meteo, type_diff = ...13)
+#saveRDS(donne_fauvette_meteo, file = "output/donne_fauvette_meteo.rds")
+```
+
+## I.2. Etude de la corrélation entre les indices comportementaux et des facteurs temporels et environnementaux
+
+On fait maintenant une ACP avec les indices météorologiques et comportementaux définis plus tôt avec les variables temporelles (heure et jour)
+
+```{r}
+df_numeric_t <- donne_fauvette_meteo[sapply(donne_fauvette_meteo, is.numeric)]
+
+res_acp_t <- PCA(df_numeric_t, scale.unit = TRUE, graph = FALSE)
+fviz_pca_var(res_acp_t,
+             col.var = "contrib", # colorer selon la contribution
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+```
+
+On voulait tracer la température en fonction du temps.
+
+```{r}
+meteo %>% ggplot(aes(x=dh_utc, y = temperature))+
+  geom_point()
+```
+
+On regarde les dimensions expliquant la plus haute proportion de la variance du jeu de données. On prend les dimensions expliquant le plus de variance.
+
+```{r}
+fviz_screeplot(res_acp_t, addlabels = TRUE, ylim = c(0, 50))
+```
+
+On remarque qu'il y a 5 dimensions expliquant plus de 10% de la variance. On analyse par biplot s'il y a une structuration entre ces dimensions.
+
+```{r}
+bp_t12 <- fviz_pca_biplot(res_acp_t, geom = 'point', axes= c(1,2), repel = TRUE,
+                col.var = "#FC4E07", col.ind = "#00AFBB")
+
+bp_t23 <- fviz_pca_biplot(res_acp_t, geom = 'point', axes= c(2,3), repel = TRUE,
+                col.var = "#FC4E07", col.ind = "#00AFBB")
+
+bp_t34 <- fviz_pca_biplot(res_acp_t, geom = 'point', axes= c(3,4), repel = TRUE,
+                col.var = "#FC4E07", col.ind = "#00AFBB")
+
+(bp_t12 | bp_t23 | bp_t34)
+```
+
+On remarque 2 groupes de points dans les dimensions 1 et 2. Pour 2 et 3, on distingue encore deux groupes, mais on n'en distingue pas pour 3 et 4.
+
+On regarde de quoi sont composées les dimensions.
+
+```{r}
+c_t1 <- fviz_contrib(res_acp_t, choice = "var", axes = 1, top = 10) +
+  labs(title = "Dim.1")
+c_t2 <- fviz_contrib(res_acp_t, choice = "var", axes = 2, top = 10)  +
+  labs(title = "Dim.2")
+c_t3 <- fviz_contrib(res_acp_t, choice = "var", axes = 3, top = 10)  +
+  labs(title = "Dim.3")
+
+
+(c_t1 | c_t2 | c_t3) + plot_layout(axes = 'collect')
+```
+
+Les deux premières dimensions sont principalement expliquées par des données environnementales. On remarque tout de même qu'il semble il y avoir une corrélation entre l'heure (minute.AM) et l'intensité des cris ainsi que l'apparition des mâles, on ira donc plus loin dans cette analyse ultérieurement. De même, on remarque avec la dimension 3 qu'il semble y avoir une corrélation entre notre indice d'activité et l'heure de la journée.
+
+## I.3. Between-Class Analysis et test de Monte Carlo
+
+On fait maintenant une BCA pour étudier l'influence des facteurs catégoriels sur la variance du jeu de données.
+
+```{r}
+pc <- dudi.pca(df_numeric_t, scannf = FALSE, nf = 9)
+```
+
+### Regroupement selon le type de diffusion
+
+```{r}
+bca_typediff <- bca(pc,as.factor(donne_fauvette_meteo$type_diff), scannf = FALSE, nf = 5)
+bca_typediff
+```
+
+```{r}
+s.class(pc$li, as.factor(donne_fauvette_meteo$type_diff), xlim = c(-4, 5.5), ylim = c(-2.5, 3), col = TRUE, main = "Regroupement selon les type de diffusions par BCA")
+```
+
+Pour savoir si les variances expliquées sont significatives, on réalise un test de Monte-Carlo.
+
+```{r}
+rand_tdiff <- randtest(bca(pc, as.factor(donne_fauvette_meteo$type_diff),  scannf = FALSE, nf = 9), 999)
+plot(rand_tdiff, main = "Monte-Carlo test pour les types de diffusions")
+```
+
+```{r}
+rand_tdiff
+```
+
+La BCA nous indique que le type de diffusion explique 4% de la variance du jeu de données. Le test de Monte-Carlo nous indique que le poids du type de diffusion sur la variance est non significative.
+
+### Regroupement selon le son diffusé
+
+Ce test permet de prendre en compte la variabilité intra-son.
+
+```{r}
+bca_diff <- bca(pc,as.factor(donne_fauvette_meteo$diff),  scannf = FALSE, nf = 9)
+bca_diff
+```
+
+```{r}
+s.class(pc$li, as.factor(donne_fauvette_meteo$diff), xlim = c(-4, 5.5), ylim = c(-3.5, 3), col = TRUE, main = "Regroupement selon les diffusions par BCA")
+```
+
+Pour savoir si les variances expliquées sont significatives, on réalise un test de Monte-Carlo.
+
+```{r}
+rand_diff <- randtest(bca(pc, as.factor(donne_fauvette_meteo$diff),  scannf = FALSE, nf = 9), 999)
+plot(rand_diff, main = "Monte-Carlo test pour les diffusions")
+```
+
+```{r}
+rand_diff
+```
+
+La BCA nous indique que les diffusions expliquent 15% de la variance du jeu de données. Le test de Monte-Carlo nous indique que le poids des diffusions sur la variance est non significative. Le fait que la variance soit beaucoup plus grande en ne regroupant pas les sons par types, nous laisse penser qu'il existe une variabiltié intra-son, nous étudirons cela ultérieurement.
+
+### Regroupement selon l'ID du mâle
+
+```{r}
+donne_IDmftf <- donne_fauvette_meteo %>% 
+  filter(!ID_male %in% c("5", "6"))
+
+df_numeric_t_IDm <- donne_IDmftf[sapply(donne_IDmftf, is.numeric)]
+
+pc_IDm <- dudi.pca(df_numeric_t_IDm,  scannf = FALSE, nf = 9)
+
+bca_ID_male <- bca(pc_IDm, factor(donne_IDmftf$ID_male, levels = c("1", "2", "3", "4", "7")),  scannf = FALSE, nf = 9)
+bca_ID_male
+```
+
+```{r}
+s.class(pc_IDm$li, factor(donne_IDmftf$ID_male, levels = c("1", "2", "3", "4", "7")), xlim = c(-3.5, 4), ylim = c(-3, 3), col = TRUE, main = "Regroupement selon l'ID du mâle par BCA")
+```
+
+Pour savoir si les variances expliquées sont significatives, on réalise un test de Monte-Carlo.
+
+```{r}
+rand_IDm <- randtest(bca(pc_IDm, factor(donne_IDmftf$ID_male, levels = c("1", "2", "3", "4", "7")), scannf = FALSE, nf = 9), 999)
+plot(rand_IDm, main = "Monte-Carlo test pour l'ID mâle")
+```
+
+```{r}
+rand_IDm
+```
+
+La BCA nous indique que les diffusions expliquent 3% de la variance du jeu de données. Le test de Monte-Carlo nous indique que le poids de l'ID du mâle sur la variance est non significative. Cependant, on semble observer une activité différente pour le mâle n°7.
+
+### Regroupement selon la journée d'échantillonage
+
+Les conditions d'échantillonnage étaient différentes entre les journées d'échantillonnage. Pour tester l'effet seul de la journée d'échantillonnage, on refait une ACP sans ce facteur, puis on réalise la BCA.
+
+```{r}
+pc_sansJour <- df_numeric_t |> select(-c(Jour)) |> dudi.pca(scannf = FALSE, nf = 9)
+bca_jour <- bca(pc_sansJour,as.factor(donne_fauvette_meteo$Jour),  scannf = FALSE, nf = 9)
+bca_jour
+```
+
+Le jour explique 23% de la variance!! On visualise donc la BCA.
+
+```{r}
+s.class(pc_sansJour$li, as.factor(df_numeric_t$Jour), xlim = c(-5, 3), ylim = c(-2.5, 3), col = TRUE, main = "Regroupement selon le jour par BCA")
+```
+
+On fait un test de Monte-Carlo.
+
+```{r}
+rand_jour <- randtest(bca(pc_sansJour, as.factor(df_numeric_t$Jour), scannf = FALSE, nf = 9), 999)
+plot(rand_jour, main = "Monte-Carlo test pour le jour")
+```
+
+```{r}
+rand_jour
+```
+
+Le test de Monte-Carlo nous indique que l'influence de la journée sur la variabilité des données est significative.
+
+# II. Questions biologiques posées
+
+## II.1. Définition d'un indice de dépense énergétique
+
+L'indice comprend les cris et les strophes pendant et après la diffusion ainsi que les survols. Selon la biblio, un vol de 2s reviendrait à un coût énergétique d'environ 15J, un chant de rouge-gorge de 600s reviendrait à 100J soit environ 0.8J pour un chant de 5s, un cri serait négligeable mais pour la prise en compte dans l'indice, nous avons considéré comme si c'était un chant court (0.2s et donc environ 0.04J). On a donc indicé le cri à 1, le chant à 25, le survol à 250.
+
+Tous les intervalles de confiance sont calculés de la manière suivante : moyenne +/- 1.96\*écart_type/sqrt(effectif)
+
+```{r}
+
+# création d'une colonne indice energie
+
+donne$indice_energy <- donne$cris_diff + donne$cris_post + 250 *       donne$survols + 25 * (donne$str_diff + donne$str_post_diff)
+```
+
+## II.2. Quelle est l'influence de l'heure de la journée sur l'activité des fauvettes ?
+
+#### Sans estimation en 2025
+
+```{r}
+#formation des classes horaires
+breaks <- seq(480, 1020, by = 60)
+labels_heure <- paste0(breaks[-length(breaks)]/60, "h-", breaks[-1]/60, "h")
+
+donne$heure_cat <- cut(donne$Minute.AM,
+                      breaks = breaks,
+                      labels = labels_heure,
+                      include.lowest = TRUE)
+#plot de l'indice énergétique par rapport à la classe horaire
+ggplot(donne, aes(x = heure_cat, y = indice_energy)) +
+  stat_summary(fun = mean, geom = "bar", fill = "tomato", alpha = 0.8) +
+  labs(title = "Énergie moyenne par tranche de 1 heure",
+       x = "Heures",
+       y = "Indice d'énergie (moyenne)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+Pour rappel, le premier jour nous n'avions pas séparer les cris, on a donc estimé le détail des cris par rapport aux proportions des cris de tout le jeu de données (en prenant en compte le type de diffusion). Attention, les estimations provenant de moyennes perdent la variabilité des résultats, il faut donc en prendre compte lors de l'analyse.
+
+Sifflements : Avant-diffusion : 0% Pendant 53.8% Après 46.2%
+
+Jardin : 24.82% 35.6% 39.58%
+
+Grisette : 23.4% 57.16% 19.45%
+
+Témoin : 0% 50% 50%
+
+Gazouillis : 3.05% 62.25% 34.7%
+
+Connaissant les cris totaux et les proportions moyennes on peut calculer le détail.
+
+#### Avec estimation en 2025
+
+```{r}
+
+#formation des classes horaires
+breaks <- seq(420, 1020, by = 60)
+labels_heure <- paste0(breaks[-length(breaks)]/60, "h-", breaks[-1]/60, "h")
+
+#coloration du jeu de données avec estimation
+donne_estim$color_group <- ifelse(donne_estim$heure_cat == "8h-9h", "avec estimation", "sans estimation")
+
+#catégories horaires
+donne_estim$heure_cat <- cut(donne_estim$Minute.AM,
+                      breaks = breaks,
+                      labels = labels_heure,
+                      include.lowest = TRUE)
+#plot avec les estimations en plus
+ggplot(donne_estim) +
+  stat_summary(aes(x = heure_cat, y = indice_energy, fill = color_group), fun = mean, geom = "bar", alpha = 0.8) +
+  stat_summary(aes(x = heure_cat, y = indice_energy, fill = color_group), fun.data = mean_cl_normal, geom = "errorbar", width = 0.2) +
+  geom_text(
+    data = data.frame(
+      "x"     = c("8h-9h","9h-10h","10h-11h","11h-12h","12h-13h","13h-14h","14h-15h","15h-16h","16h-17h"),
+      "y"     = c(410,525,830,450,590,450,420,300,710),
+      "label" = c("a","a","b","ns","ns","a","a","a","ns")
+    ),
+    aes(x = x, y = y, label = label),
+    size = 3
+  ) +
+  scale_fill_manual(
+    values = c("avec estimation" = "darkblue", "sans estimation" = "tomato")
+  ) +
+  labs(
+    title = "Indice d'énergie moyenne par tranche de 1 heure",
+     x    = "Heures",
+     y    = "Indice d'énergie (moyenne)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# mean_cl_normal considère la distrib comme normale et moy+/-1.96*ecarttype/sqrt(n)--> 1.96 car student à 95%
+```
+
+##### modèle linéaire (paramétrique)
+
+```{r}
+#modification des references pour tester les différences entre les intervales
+#modifier la classe horaire de ref pour voir avec quoi c'est significativement différent
+donne_estim$heure_cat <- relevel(donne_estim$heure_cat, ref = "10h-11h")
+
+model <- lm(indice_energy ~ heure_cat  , data = donne_estim )
+summary(model)
+
+```
+
+Résidus gaussiens ?
+
+```{r}
+ hist(residuals((model)) , breaks = 40)
+```
+
+Il semblerait qu'il y ait une distribution pseudo-normale
+
+Vérification de la loi gaussienne 1
+
+```{r}
+plot(model , which = 2)
+```
+
+QQ plot pas terrible
+
+Homoscédasticité ?
+
+```{r}
+check_heteroskedasticity(model)
+```
+
+Visiblement pas homoscédastique, les hypothèses ne sont pas validées.
+
+##### test non paramétrique
+
+```{r}
+kruskal.test(indice_energy ~ heure_cat, data = donne_estim)
+```
+
+Pas de différence d'après le test de Kruskal-Wallis
+
+```{r}
+#dunn test pour comparer deux à deux les résultats
+dunn_test(data=donne_estim , indice_energy ~ heure_cat)
+```
+
+Donc, d'après les résutlats du Dunn-test et du modèle linéaire, 10h-11h est significativement différent de 8h-10h et 13h-16h. Les résultats provenant de tests différents, les conclusions sont robustes, il y a donc un pic d'activité de réponses des fauvettes à têtes noires entre 10h et 11h.
+
+### Impact sur l'indice énergétique global inter-année
+
+#### Création nouvel indice
+
+Les autres années n'ayant pas le détail des cris ni les strophes pendant la diffusion, le calcul se fait avec tout le reste en se basant sur les mêmes facteurs multiplicatifs.
+
+```{r}
+table_birds_2024 <- read_csv("table_birds_2024.csv")
+table_birds_2023 <- read_csv("table_birds_2023.csv")
+```
+
+```{r}
+#indice energy 2025 sans strophes diff car les autres années ne l'ont pas....
+donne_estim$indice_energy_global <- donne_estim$cris_toto + 250 * donne_estim$survols + 25 * (donne_estim$str_post_diff + donne_estim$str_pre)
+
+#indice energy 2024
+table_birds_2024$indice_energy_global <- table_birds_2024$CRIS + 250 * table_birds_2024$SURVOLS + 25 * (table_birds_2024$STROPHES_AVANT + table_birds_2024$STROPHES_APRES)
+
+#indice energy 2023
+table_birds_2023$indice_energy_global <- table_birds_2023$CRIS + 250 * table_birds_2023$SURVOLS + 25 * (table_birds_2023$STROPHES_APRES + table_birds_2023$STROPHES_AVANT)
+
+table_birds_2024$HEURE <- hms::as_hms(table_birds_2024$HEURE)
+table_birds_2023$HEURE <- hms::as_hms(table_birds_2023$HEURE)
+
+# Conversion en minutes
+table_birds_2024$minutes <- hour(table_birds_2024$HEURE) * 60 + minute(table_birds_2024$HEURE)
+table_birds_2023$minutes <- hour(table_birds_2023$HEURE) * 60 + minute(table_birds_2023$HEURE)
+
+# création des caté d'heures
+table_birds_2024$heure_cat <- cut(table_birds_2024$minutes,
+                      breaks = breaks,
+                      labels = labels_heure,
+                      include.lowest = TRUE)
+table_birds_2023$heure_cat <- cut(table_birds_2023$minutes,
+                      breaks = breaks,
+                      labels = labels_heure,
+                      include.lowest = TRUE)
+
+
+# création d'un tableau commun à tous
+
+tableau_global <- bind_rows(
+  table_birds_2023 %>% select(c(indice_energy_global, heure_cat)),
+  table_birds_2024 %>% select(c(indice_energy_global, heure_cat)),
+  donne_estim    %>% select(c(indice_energy_global, heure_cat))
+)
+
+View(tableau_global)
+tableau_global<-na.omit(tableau_global)
+
+# création du graph combiné des années
+ggplot(tableau_global, aes(x = heure_cat, y = indice_energy_global)) +
+  stat_summary(fun = mean, geom = "bar", alpha = 0.8) + stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.2) +geom_text(
+    data = data.frame(
+      "x"     = c("7h-8h","8h-9h","9h-10h","10h-11h","11h-12h","12h-13h","13h-14h","14h-15h","15h-16h","16h-17h"),
+      "y"     = c(485,340,450,450,370,425,365,235,210,320),
+      "label" = c("a-c","ns","a","a","ns","ns","ns","b","b","b-c")
+    ),
+    aes(x = x, y = y, label = label),
+    size = 3
+  ) + labs(title = "Indice d'énergie globale par tranche de 1 heure",
+       x = "Tranche horaire",
+       y = "Indice d'énergie globale (moyenne)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+##### modèle linéaire (paramétrique) 2
+
+```{r}
+#modification des references pour tester les différences entre les intervales
+tableau_global$heure_cat <- relevel(tableau_global$heure_cat, ref = "9h-10h")
+
+model3 <- lm(indice_energy_global ~ heure_cat  , data = tableau_global )
+summary(model3)
+```
+
+Vérification des hypothèses
+
+```{r}
+hist(residuals((model3)) , breaks = 40)
+plot(model3 , which = 2)
+check_heteroskedasticity(model3)
+```
+
+Les hypothèses ne sont clairement pas validées
+
+##### test non paramétrique 2
+
+```{r}
+kruskal.test(indice_energy_global ~ heure_cat, data = tableau_global)
+```
+
+La p-value étant basse, le test détecte des différences significatives entre les catégories horaires.
+
+```{r}
+dunn_test(data=tableau_global , indice_energy_global ~ heure_cat)
+```
+
+Le test détecte que les dépenses énergétiques entre 9h-10h et 14h-17h, entre 7h-8h et 14h-16h,entre 10h-11h et 14h-17h, sont significativement différentes.
+
+### Impact de la classe horaire sur l'activité
+
+```{r}
+#formation des classes horaires
+
+breaks <- seq(420, 1020, by = 60)
+labels_heure <- paste0(breaks[-length(breaks)]/60, "h-", breaks[-1]/60, "h")
+donne_fauvette_meteo$heure_cat <- cut(donne_fauvette_meteo$Minute.AM,
+                      breaks = breaks,
+                      labels = labels_heure,
+                      include.lowest = TRUE)
+
+
+#création du plot
+
+ggplot(donne_fauvette_meteo) +
+  stat_summary(aes(x = heure_cat, y = dist_lat_strophe_survol), fun = mean, geom = "bar", alpha = 0.8) +
+  stat_summary(aes(x = heure_cat, y = dist_lat_strophe_survol), fun.data = mean_cl_normal, geom = "errorbar", width = 0.2) +
+  geom_text(
+    data = data.frame(
+      "x"     = c(1,2,3,4,5,6,7,8,9),
+      "y"     = c(1.5,1.3,2.4,1.8,1.7,1.5,0.8,0.4,1.3),
+      "label" = c("ns","ns","a","ns","ns","ns","b","b","ns")
+    ),
+    aes(x = x, y = y, label = label),
+    size = 3
+  ) +
+  labs(
+    title = "Indice d'activité par tranche de 1 heure",
+     x    = "Heures",
+     y    = "Indice d'activité"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+##### modèle linéaire (paramétrique) 3
+
+```{r}
+#modification des references pour tester les différences entre les intervales
+donne_fauvette_meteo$heure_cat <- relevel(donne_fauvette_meteo$heure_cat, ref = "10h-11h")
+
+model4 <- lm(dist_lat_strophe_survol ~ heure_cat  , data = donne_fauvette_meteo )
+summary(model4)
+```
+
+Vérification des hypothèses
+
+```{r}
+hist(residuals((model4)) , breaks = 40)
+plot(model4 , which = 2)
+check_heteroskedasticity(model4)
+```
+
+En dehors des valeurs inférieures à -1, il semblerait que l'on ait une distribution normale, et les différentes hypothèses sont validées, il y aurait donc une différence significative entre 10h-11h et 14h-16h. Pour consolider / approfondir, on peut poursuivre avec un kruskal test.
+
+##### test non paramétrique 3
+
+```{r}
+kruskal.test(dist_lat_strophe_survol ~ heure_cat, data = donne_fauvette_meteo)
+```
+
+```{r}
+dunn_test(data=donne_fauvette_meteo , dist_lat_strophe_survol ~ heure_cat)
+```
+
+Le test confirme une différence significative entre 10h-11h et 14h-16h. Cela confirme bien le pic d'activité en fin de matinée de la fauvette à tête noire.
+
+## II.3. Quelle est l'influence des paramètres météorologiques sur l'activité des fauvettes ?
+
+### Compilation des indices météo par classes horaires
+
+```{r}
+# calcul les moyennes indices 1,2,3 (temperature_vent_météo, pluie, ensoleillement) :
+moyennes_par_tranche <- donne_fauvette_meteo %>%
+  group_by(heure_cat) %>%
+  summarise(moyenne_Temperature_Vent_Humidite = mean(temperature_vent_humidite, na.rm = TRUE),moyenne_pluie = mean(pluie, na.rm = TRUE),moyenne_soleil = mean(ensoleillement, na.rm = TRUE)) 
+View(moyennes_par_tranche)
+```
+
+### Plot joint entre l'indice energétique de réponse par heure et les indices météo
+
+```{r}
+donne_estim <- readRDS(file = "données_estim.rds")
+
+#ordre_heures <- c("8h-9h", "9h-10h", "10h-11h", "11h-12h", "12h-13h", 
+#                  "13h-14h", "14h-15h", "15h-16h", "16h-17h")
+#donne_estim$heure_cat <- factor(donne_estim$heure_cat, levels = ordre_heures)
+#moyennes_par_tranche$heure_cat <- factor(moyennes_par_tranche$heure_cat, levels = ordre_heures)
+
+
+#plot avec les estimations en plus
+ggplot(donne_estim) +
+  stat_summary(aes(x = heure_cat, y = indice_energy, fill = color_group), fun = mean, geom = "bar", alpha = 0.8) +
+  stat_summary(aes(x = heure_cat, y = indice_energy, fill = color_group), fun.data = mean_cl_normal, geom = "errorbar", width = 0.2) +
+  geom_text(
+    data = data.frame(
+      "x"     = c("8h-9h","9h-10h","10h-11h","11h-12h","12h-13h","13h-14h","14h-15h","15h-16h","16h-17h"),
+      "y"     = c(420,530,835,450,590,450,420,300,715),
+      "label" = c("a","a","b","ns","ns","a","a","a","ns")
+    ),
+    aes(x = x, y = y, label = label),
+    size = 3
+  ) +
+  geom_line(
+    data = moyennes_par_tranche ,
+    aes(x=heure_cat , y=50*moyenne_Temperature_Vent_Humidite+1000, group = 1), color = 'black'
+  )+
+  geom_line(
+    data = moyennes_par_tranche,
+    aes(x=heure_cat , y=50*moyenne_pluie+800, group = 1), color = 'blue'
+  )+
+  geom_line(
+    data = moyennes_par_tranche ,
+    aes(x=heure_cat , y=50*moyenne_soleil+900, group = 1), color = 'orange'
+  )+ geom_text(
+    data = data.frame(
+      "x"     = c("15h-16h","15h-16h","15h-16h"),
+      "y"     = c(1100,950,810),
+      "label" = c("T°c - Vent","Soleil","Pluie")
+    ),
+    aes(x = x, y = y, label = label),
+    size = 3
+  ) +
+  scale_fill_manual(
+    values = c("avec estimation" = "darkblue", "sans estimation" = "tomato")
+  ) +
+  scale_y_continuous(sec.axis = sec_axis(transform = ~./50, name = "Indices ACP (UA)")) +
+  labs(
+    title = "Indice d'énergie moyenne par tranche de 1 heure",
+     x    = "Heures",
+     y    = "Indice d'énergie (moyenne)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Les courbes des indices météo ne semblent pas impacter l'intensité de la réponse. Toutefois, l'indice de température et de vent a les même variations journalières que l'intensité de la réponse, on peut suspecter un lien de causalité.
+
+Importation de l'indice énergétique dans le data frame Donnees_ACP:
+
+```{r}
+rm(donnen)
+donnen <- donne %>% mutate(cris_post = donne_estim$cris_post,
+                          cris_pre = donne_estim$cris_pre,
+                          cris_diff = donne_estim$cris_diff,
+                          cris_toto = donne_estim$cris_toto)
+
+donnen <- bind_cols(donnen, donne_estim$indice_energy)
+#donnen <- rename(donnen, indice_energy = ...44)
+donnen <- donnen %>% mutate(ID_male = as.factor(ID_male))
+donne_nuage <- donnen %>% select(c(indice_energy, str_diff, cris_diff, dh_utc_arrondi, diff, type_diff))
+donne_nuage <- donne_nuage %>% left_join(donne_meteo, by = c("dh_utc_arrondi" = "dh_utc"))
+```
+
+```{r}
+
+donne_nuage <- readRDS(file = "output/donne_nuage.rds")
+
+
+```
+
+### Importation des données
+
+```{r}
+Donnees_complet <- readRDS("output/donne.rds")
+View(fauvette)
+View(meteo)
+View(Donnees_complet)
+
+```
+
+### Importation des regroupements de paramètres issus d'ACP
+
+```{r}
+Donnees_ACP <- readRDS("output/donne_fauvette_meteo.rds")
+View(Donnees_ACP)
+```
+
+Le data frame "donne_nuage" est un data frame qui contient l'indice d'énergie, type_diff et les indices de l'ACP météo.
+
+#### Indice d'Activité = f(météo)
+
+```{r}
+
+##Indice 1 de la météo
+# Création du modèle et test statistique
+modele_lm_meteo1 <- lm(dist_lat_strophe_survol ~ temperature_vent_humidite, data = Donnees_ACP)
+r2 <- summary(modele_lm_meteo1)$r.squared
+pval <- summary(modele_lm_meteo1)$coefficients[2, 4]
+performance::check_normality(modele_lm_meteo1)
+performance::check_heteroskedasticity(modele_lm_meteo1)
+performance::check_model(modele_lm_meteo1)
+
+# Graphique avec droite de régression + R² + p-value
+ggplot(Donnees_ACP, aes(x = temperature_vent_humidite, y = dist_lat_strophe_survol)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate("text", x = Inf, y = Inf, label = paste0("R² = ", round(r2, 3)),
+           hjust = 1.1, vjust = 1.5, size = 4, fontface = "italic") +
+  annotate("text", x = Inf, y = Inf, label = paste0("p = ", format.pval(pval, digits = 3, eps = .001)),
+           hjust = 1.1, vjust = 3.4, size = 4, fontface = "italic") +
+  theme_minimal() +
+  labs(
+    title = "Indice d'Activité des fauvettes en fonction de la météo (Indices 1)",
+    x = "Météo (Indice 1 : Température + vent + humidité)",
+    y = "Activité (Indice 1 : Dmin + latence + str + survol)"
+  ) +
+  theme(legend.position = "none")
+
+
+##Indice 2 de la météo
+# Création du modèle et test statistique
+modele_lm_meteo2 <- lm(dist_lat_strophe_survol ~ pluie, data = Donnees_ACP)
+r2 <- summary(modele_lm_meteo2)$r.squared
+pval <- summary(modele_lm_meteo2)$coefficients[2, 4]
+performance::check_normality(modele_lm_meteo2)
+performance::check_heteroskedasticity(modele_lm_meteo2)
+performance::check_model(modele_lm_meteo2)
+
+# Graphique avec droite de régression + R² + p-value
+ggplot(Donnees_ACP, aes(x = pluie, y = dist_lat_strophe_survol)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  annotate("text", x = Inf, y = Inf, label = paste0("R² = ", round(r2, 3)),
+           hjust = 1.1, vjust = 1.5, size = 4, fontface = "italic") +
+  annotate("text", x = Inf, y = Inf, label = paste0("p = ", format.pval(pval, digits = 3, eps = .001)),
+           hjust = 1.1, vjust = 3.4, size = 4, fontface = "italic") +
+  theme_minimal() +
+  labs(
+    title = "Indice d'Activité des fauvettes en fonction de la météo (Indice 2)",
+    x = "Météo (Indice 2 : Pluie)",
+    y = "Activité (Indice 1 : Dmin + latence + str + survol)"
+  ) +
+  theme(legend.position = "none")
+
+
+##Indice 3 de la météo
+# Création du modèle et test statistique
+modele_lm_meteo3 <- lm(dist_lat_strophe_survol ~ ensoleillement, data = Donnees_ACP)
+r2 <- summary(modele_lm_meteo3)$r.squared
+pval <- summary(modele_lm_meteo3)$coefficients[2, 4]
+performance::check_normality(modele_lm_meteo3)
+performance::check_heteroskedasticity(modele_lm_meteo3)
+performance::check_model(modele_lm_meteo3)
+
+# Graphique avec droite de régression + R² + p-value
+ggplot(Donnees_ACP, aes(x = ensoleillement, y = dist_lat_strophe_survol)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "orange") +
+  annotate("text", x = Inf, y = Inf, label = paste0("R² = ", round(r2, 3)),
+           hjust = 1.1, vjust = 1.5, size = 4, fontface = "italic") +
+  annotate("text", x = Inf, y = Inf, label = paste0("p = ", format.pval(pval, digits = 3, eps = .001)),
+           hjust = 1.1, vjust = 3.4, size = 4, fontface = "italic") +
+  theme_minimal() +
+  labs(
+    title = "Indice d'Activité des fauvettes en fonction de la météo (Indice 3)",
+    x = "Météo (Indice 3 : Ensoleillement)",
+    y = "Activité (Indice 1 : Dmin + latence + str + survol)"
+  ) +
+  theme(legend.position = "none")
+
+
+```
+
+On observe que seul l'axe 1 de la météo (température + vent + humidité) explique une partie des données (3.5%)
+
+#### Indice d'énergie = f(météo)
+
+```{r}
+
+
+##Axe 1 de la météo
+# Création du modèle et test statistique
+modele_lm_meteo1_energie <- lm(indice_energy ~ temperature_vent_humidite, data = donne_nuage)
+r2 <- summary(modele_lm_meteo1_energie)$r.squared
+pval <- summary(modele_lm_meteo1_energie)$coefficients[2, 4]
+performance::check_normality(modele_lm_meteo1_energie)
+performance::check_heteroskedasticity(modele_lm_meteo1_energie)
+performance::check_model(modele_lm_meteo1_energie)
+
+# Graphique avec droite de régression + R² + p-value
+ggplot(donne_nuage, aes(x = temperature_vent_humidite, y = indice_energy)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  annotate("text", x = Inf, y = Inf, label = paste0("R² = ", round(r2, 3)),
+           hjust = 1.1, vjust = 1.5, size = 4, fontface = "italic") +
+  annotate("text", x = Inf, y = Inf, label = paste0("p = ", format.pval(pval, digits = 3, eps = .001)),
+           hjust = 1.1, vjust = 3.4, size = 4, fontface = "italic") +
+  theme_minimal() +
+  labs(
+    title = "Indice énergétique des fauvettes en fonction de la météo (Indice 1)",
+    x = "Météo (Indice 1 : Température + vent + humidité)",
+    y = "Indice énergétique"
+  ) +
+  theme(legend.position = "none")
+
+
+##Axe 2 de la météo
+# Création du modèle et test statistique
+modele_lm_meteo2_energie <- lm(indice_energy ~ pluie, data = donne_nuage)
+r2 <- summary(modele_lm_meteo2_energie)$r.squared
+pval <- summary(modele_lm_meteo2_energie)$coefficients[2, 4]
+performance::check_normality(modele_lm_meteo2_energie)
+performance::check_heteroskedasticity(modele_lm_meteo2_energie)
+performance::check_model(modele_lm_meteo2_energie)
+
+# Graphique avec droite de régression + R² + p-value
+ggplot(donne_nuage, aes(x = pluie, y = indice_energy)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  annotate("text", x = Inf, y = Inf, label = paste0("R² = ", round(r2, 3)),
+           hjust = 1.1, vjust = 1.5, size = 4, fontface = "italic") +
+  annotate("text", x = Inf, y = Inf, label = paste0("p = ", format.pval(pval, digits = 3, eps = .001)),
+           hjust = 1.1, vjust = 3.4, size = 4, fontface = "italic") +
+  theme_minimal() +
+  labs(
+    title = "Indice énergétique des fauvettes en fonction de la météo (Indice 2)",
+    x = "Météo (Indice 2 : Pluie)",
+    y = "Indice énergétique"
+  ) +
+  theme(legend.position = "none")
+
+
+##Axe 3 de la météo
+# Création du modèle et test statistique
+modele_lm_meteo3_energie <- lm(indice_energy ~ ensoleillement, data = donne_nuage)
+r2 <- summary(modele_lm_meteo3_energie)$r.squared
+pval <- summary(modele_lm_meteo3_energie)$coefficients[2, 4]
+performance::check_normality(modele_lm_meteo3_energie)
+performance::check_heteroskedasticity(modele_lm_meteo3_energie)
+performance::check_model(modele_lm_meteo3_energie)
+
+# Graphique avec droite de régression + R² + p-value
+ggplot(donne_nuage, aes(x = ensoleillement, y = indice_energy)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "orange") +
+  annotate("text", x = Inf, y = Inf, label = paste0("R² = ", round(r2, 3)),
+           hjust = 1.1, vjust = 1.5, size = 4, fontface = "italic") +
+  annotate("text", x = Inf, y = Inf, label = paste0("p = ", format.pval(pval, digits = 3, eps = .001)),
+           hjust = 1.1, vjust = 3.4, size = 4, fontface = "italic") +
+  theme_minimal() +
+  labs(
+    title = "Indice énergétique des fauvettes en fonction de la météo (Indice 3)",
+    x = "Météo (Indice 3 : Ensoleillement)",
+    y = "Indice énergétique"
+  ) +
+  theme(legend.position = "none")
+
+
+```
+
+On observe qu'en utilisant l'indice énergétique, on obtient les même résultats que ceux obtenue en utilisant l'indice d'activité. Ce qui confirme notre conclusion : l'indice 1 des paramètres météorologiques (Température + vent + humidité) est le seul à expliquer une part de la variance de l'activité des fauvettes à têtes noire.
+
+## II.4. Existe-il une atténuation de la réponse des fauvettes au fil des diffusions ?
+
+### Mise en page des données
+
+```{r}
+rep <- donne_estim$indice_energy
+indice1 <- donne_fauvette_meteo$dist_lat_strophe_survol
+pré <- 25*(donne_estim$str_pre) + donne_estim$cris_pre
+mâle <- as.factor(donne_fauvette_meteo$ID_male)
+jour <- as.factor(donne_fauvette_meteo$Jour)
+diff <- relevel(as.factor(donne_fauvette_meteo$diff),"T_1")
+
+```
+
+### Impact du jour d'échantillonnage
+
+```{r}
+lmjour <- lm(rep~jour)
+summary(lmjour)
+#non normalité et hétéroscédasticité
+performance::check_model(lmjour)
+performance::check_normality(lmjour)
+performance::check_heteroscedasticity(lmjour)
+kruskal.test(rep~jour)
+# relation linéaire en non param
+```
+
+```{r}
+lmjour <- lm(indice1~jour)
+summary(lmjour)
+#non normalité et hétéroscédasticité
+performance::check_model(lmjour)
+performance::check_normality(lmjour)
+performance::check_heteroscedasticity(lmjour)
+kruskal.test(indice1~jour)
+# relation linéaire en non param
+```
+
+### Utilisation de toutes les années
+
+mise en page des données
+
+```{r}
+fauvette_2024 <- read.csv("table_birds_2024.csv", sep = ",", header = TRUE, encoding = "UTF-8")
+fauvette_2023 <- read.csv("table_birds_2023.csv", sep = ",", header = TRUE, encoding = "UTF-8")
+
+fauvette_2023 <- fauvette_2023 %>%
+  mutate(
+    JOUR = ifelse(JOUR == 5, 1, JOUR),
+    JOUR = ifelse(JOUR == 6, 2, JOUR),
+    JOUR = ifelse(JOUR == 7, 3, JOUR),
+    JOUR = ifelse(JOUR == 8, 4, JOUR)
+  )
+
+fauvette_2024 <- fauvette_2024 %>% mutate(
+  JOUR = ifelse(JOUR == "2024-04-09", 1, JOUR),
+  JOUR = ifelse(JOUR == "2024-04-10", 2, JOUR),
+  JOUR = ifelse(JOUR == "2024-04-11", 3, JOUR),
+  JOUR = ifelse(JOUR == "2024-04-12", 4, JOUR),
+  JOUR = as.numeric(JOUR)
+)
+
+fauvette_2023 <- fauvette_2023 %>% mutate(indice_energy_globa = CRIS + 250 * SURVOLS + 25 * (STROPHES_AVANT + STROPHES_APRES))
+
+fauvette_2024 <- fauvette_2024 %>% mutate(indice_energy_globa = CRIS + 250 * SURVOLS + 25 * (STROPHES_AVANT + STROPHES_APRES))
+
+fauvette_attenuation <- fauvette %>% mutate(indice_energy_globa = cris_toto + 250 * survols + 25 * (str_pre + str_post_diff),
+                                            JOUR = Jour)
+
+
+
+donne_attenuation <- fauvette_2023 %>% select(indice_energy_globa, JOUR)
+donne_attenuation <- bind_rows(donne_attenuation, fauvette_2024, fauvette_attenuation)
+donne_attenuation <- donne_attenuation %>% select(indice_energy_globa, JOUR)
+donne_attenuation <- donne_attenuation %>% mutate(JOUR = as.factor(JOUR))                 
+```
+
+représentation graphique et test tatistique
+
+```{r}
+
+#Création du graphique 
+donne_attenuation %>% ggplot(aes(x = JOUR, y = indice_energy_globa, fill = JOUR)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Activité des fauvettes selon le jour de diffusion",
+       x = "Jour", y = "Indice d'activité global") +
+  theme(legend.position = "none")
+
+#Test statistique
+donne_attenuation$JOUR <- factor(donne_attenuation$JOUR)  # Conversion en facteur
+donne_attenuation$JOUR <- relevel(donne_attenuation$JOUR, ref = "1")  # Changer la référence
+modele_lm_att <- lm(donne_attenuation$indice_energy_globa ~ JOUR , data = donne_attenuation)
+
+summary(modele_lm_att)
+performance::check_normality(modele_lm_att)
+performance::check_heteroskedasticity(modele_lm_att)
+
+```
+
+Les hypothèses ne sont pas respectées on fait donc un kruskal test (test non paramétrique)
+
+```{r}
+kruskal.test(donne_attenuation$indice_energy_globa ~ JOUR , data = donne_attenuation)
+```
+
+## II.5. Y a-t-il une variabilité de comportement entre les individus ?
+
+Effet du mâle
+
+```{r}
+lmmal <- lm(rep~mâle)
+summary(lmmal)
+performance::check_model(lmmal)
+performance::check_normality(lmmal)
+performance::check_heteroscedasticity(lmmal)
+#non normalité et hétéroscédasticité
+kruskal.test(rep~mâle)
+#pas de relation linéaire en non param
+```
+
+```{r}
+lmmale <- lm(indice1~mâle)
+summary(lmmale)
+performance::check_model(lmmale)
+performance::check_normality(lmmale)
+performance::check_heteroscedasticity(lmmale)
+#non normalité et homoscédasticité
+kruskal.test(indice1~mâle)
+#non normalité et homoscédasticité
+
+#pas de relation linéaire en non param
+```
+
+## II.6. Quelle est l'influence de l'enregistrement diffusé sur l'activité des fauvettes ?
+
+### Cris en fonction du type de chant diffusé
+
+```{r}
+# Création des groupes de triplet de str (pré, diff et post diff)
+view(donne)
+Donnees_complet_str <- fauvette %>%
+  pivot_longer(cols = c(cris_pre, cris_diff, cris_post),
+               cols_vary = "fastest",
+               names_to = "moment_cris", 
+               values_to = "valeur")%>%
+  mutate(moment_cris = factor(moment_cris, levels = c("cris_pre", "cris_diff", "cris_post")))
+
+# Graphique avec str_diff et str_post différenciés par la couleur
+ggplot(Donnees_complet_str, aes(x = type_diff, y = valeur, fill = moment_cris)) +
+  geom_boxplot(position = position_dodge(width = 0.75)) +
+  theme_minimal() +
+  labs(title = "Nb de cris selon le type de chant diffusé",
+       x = "Type de chant diffusé", y = "Valeur") +
+  theme(legend.title = element_blank())
+```
+
+### Boxplot chant émits en fonction du chant diffusé
+
+```{r}
+
+# Création des groupes de triplet de str (pré, diff et post diff)
+Donnees_complet_str <- Donnees_complet %>%
+  pivot_longer(cols = c(str_pre, str_diff, str_post_diff),
+               names_to = "moment_chant", 
+               values_to = "valeur") %>%
+  mutate(moment_chant = factor(moment_chant, levels = c("str_pre", "str_diff", "str_post_diff")))
+
+# Graphique avec str_diff et str_post différenciés par la couleur
+ggplot(Donnees_complet_str, aes(x = type_diff, y = valeur, fill = moment_chant)) +
+  geom_boxplot(position = position_dodge(width = 0.75)) +
+  theme_minimal() +
+  labs(title = "Nb de str_diff et str_post selon le type de chant diffusé",
+       x = "Type de chant diffusé", y = "Valeur") +
+  theme(legend.title = element_blank())
+
+```
+
+On observe de grandes différences de réponse lorsque l'on emet des chants Complet, Jardin et Sifflement par rapport au témoin. Cependant, ces réponses sont quantifiées uniquement par les chants émis par les fauvettes à têtes noire. et nous n'avons pas fait de tests statistiques pour soutenir ces résultats.
+
+Une façon plus précise de quantifier l'activité des fauvettes, est d'utiliser l'indice d'activité obtenu par ACP.
+
+### Indice d'Activité = f(diffusion)
+
+```{r}
+#Création du graphique 
+ggplot(Donnees_ACP, aes(x = type_diff, y = dist_lat_strophe_survol, fill = type_diff)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Activité des fauvettes en fonction du chant diffusé",
+       x = "Type de chant diffusé", y = "Activité (Indice 1 : Dmin + latence + str + survol") +
+  theme(legend.position = "none")
+
+#Test statistique
+Donnees_ACP$type_diff <- factor(Donnees_ACP$type_diff)  # Conversion en facteur
+Donnees_ACP$type_diff <- relevel(Donnees_ACP$type_diff, ref = "T")  # Changer la référence
+modele_lm_diff <- lm(Donnees_ACP$dist_lat_strophe_survol ~ type_diff , data = Donnees_ACP)
+modele_lm_diff
+summary(modele_lm_diff)
+performance::check_normality(modele_lm_diff)
+performance::check_heteroskedasticity(modele_lm_diff)
+performance::check_model(modele_lm_diff)
+```
+
+### Indice d'énergie = f(diffusion)
+
+```{r}
+#Création du graphique 
+ggplot(donne_nuage, aes(x = type_diff, y = indice_energy, fill = type_diff)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Indice énergétique en fonction du type de chant diffusé",
+       x = "Type de chant diffusé", y = "Indice énergétique") +
+  theme(legend.position = "none")
+
+#Test statistique
+donne_nuage$type_diff <- factor(donne_nuage$type_diff)
+donne_nuage$type_diff <- relevel(donne_nuage$type_diff, ref = "T")
+modele_lm_diff_energie <- lm(donne_nuage$indice_energy ~ type_diff , data = donne_nuage)
+modele_lm_diff_energie
+summary(modele_lm_diff_energie)
+performance::check_normality(modele_lm_diff_energie)
+performance::check_heteroskedasticity(modele_lm_diff_energie)
+performance::check_model(modele_lm_diff_energie)
+```
+
+# III. Critiques et Perspectives
+
+## Variabilité intra-chant
+
+On observe une variabilité intra-chant vis-à-vis de la réponse. On pourrait justifier que cette différence de réponse est du aux variations de l'environnement et non pas dû aux variations intra-chants. Mais on suppose ici que comme notre plan expérimental est généré aléatoirement, alors on peut faire l'hypothèse que tous les chant ont été diffusés indépendament des paramètres météorologiques.
+
+### Variabilité intra-chant en utilisant le nombre de strophes émis par les fauvettes
+
+```{r}
+## Variabilité intra-complet pour le chant
+# Filtrage des données pour ne garder que les lignes où 'diff' vaut C_1 à C_4
+Donnees_filtrees <- Donnees_complet %>%
+  filter(diff %in% c("C_1", "C_2", "C_3", "C_4"))
+# Création des groupes de triplet de str (pré, diff et post diff)
+Donnees_complet_str <- Donnees_filtrees %>%
+  pivot_longer(cols = c(str_pre, str_diff, str_post_diff),
+               names_to = "moment_chant", 
+               values_to = "valeur") %>%
+  mutate(moment_chant = factor(moment_chant, levels = c("str_pre", "str_diff", "str_post_diff")),
+         diff = factor(diff, levels = c("C_1", "C_2", "C_3", "C_4")))  # Pour avoir le bon ordre
+# Graphique avec l’axe x comme les C_1 à C_4 et les str différenciés par la couleur
+ggplot(Donnees_complet_str, aes(x = diff, y = valeur, fill = moment_chant)) +
+  geom_boxplot(position = position_dodge(width = 0.75)) +
+  theme_minimal() +
+  labs(title = "Nb de str selon les conditions C_1 à C_4",
+       x = "Condition (C_1 à C_4)", y = "Valeur") +
+  theme(legend.title = element_blank())
+
+
+## Variabilité intra-gazoulli pour le chant
+# Filtrage des données pour ne garder que les lignes où 'diff' vaut C_1 à C_4
+Donnees_filtrees <- Donnees_complet %>%
+  filter(diff %in% c("G_1", "G_2", "G_3", "G_4"))
+# Création des groupes de triplet de str (pré, diff et post diff)
+Donnees_complet_str <- Donnees_filtrees %>%
+  pivot_longer(cols = c(str_pre, str_diff, str_post_diff),
+               names_to = "moment_chant", 
+               values_to = "valeur") %>%
+  mutate(moment_chant = factor(moment_chant, levels = c("str_pre", "str_diff", "str_post_diff")),
+         diff = factor(diff, levels = c("G_1", "G_2", "G_3", "G_4")))  # Pour avoir le bon ordre
+# Graphique avec l’axe x comme les G_1 à G_4 et les str différenciés par la couleur
+ggplot(Donnees_complet_str, aes(x = diff, y = valeur, fill = moment_chant)) +
+  geom_boxplot(position = position_dodge(width = 0.75)) +
+  theme_minimal() +
+  labs(title = "Nb de str selon les conditions G_1 à G_4",
+       x = "Condition (G_1 à G_4)", y = "Valeur") +
+  theme(legend.title = element_blank())
+
+
+## Variabilité intra-sifflement pour le chant
+# Filtrage des données pour ne garder que les lignes où 'diff' vaut S_1 à S_4
+Donnees_filtrees <- Donnees_complet %>%
+  filter(diff %in% c("S_1", "S_2", "S_3", "S_4"))
+# Création des groupes de triplet de str (pré, diff et post diff)
+Donnees_complet_str <- Donnees_filtrees %>%
+  pivot_longer(cols = c(str_pre, str_diff, str_post_diff),
+               names_to = "moment_chant", 
+               values_to = "valeur") %>%
+  mutate(moment_chant = factor(moment_chant, levels = c("str_pre", "str_diff", "str_post_diff")),
+         diff = factor(diff, levels = c("S_1", "S_2", "S_3", "S_4")))  # Pour avoir le bon ordre
+# Graphique avec l’axe x comme les S_1 à S_4 et les str différenciés par la couleur
+ggplot(Donnees_complet_str, aes(x = diff, y = valeur, fill = moment_chant)) +
+  geom_boxplot(position = position_dodge(width = 0.75)) +
+  theme_minimal() +
+  labs(title = "Nb de str selon les conditions S_1 à S_4",
+       x = "Condition (S_1 à S_4)", y = "Valeur") +
+  theme(legend.title = element_blank())
+
+
+## Variabilité intra-grizette pour le chant
+# Filtrage des données pour ne garder que les lignes où 'diff' vaut Gr_1 à Gr_4
+Donnees_filtrees <- Donnees_complet %>%
+  filter(diff %in% c("Gr_1", "Gr_2", "Gr_3", "Gr_4"))
+# Création des groupes de triplet de str (pré, diff et post diff)
+Donnees_complet_str <- Donnees_filtrees %>%
+  pivot_longer(cols = c(str_pre, str_diff, str_post_diff),
+               names_to = "moment_chant", 
+               values_to = "valeur") %>%
+  mutate(moment_chant = factor(moment_chant, levels = c("str_pre", "str_diff", "str_post_diff")),
+         diff = factor(diff, levels = c("Gr_1", "Gr_2", "Gr_3", "Gr_4")))  # Pour avoir le bon ordre
+# Graphique avec l’axe x comme les Gr_1 à Gr_4 et les str différenciés par la couleur
+ggplot(Donnees_complet_str, aes(x = diff, y = valeur, fill = moment_chant)) +
+  geom_boxplot(position = position_dodge(width = 0.75)) +
+  theme_minimal() +
+  labs(title = "Nb de str selon les conditions Gr_1 à Gr_4",
+       x = "Condition (Gr_1 à Gr_4)", y = "Valeur") +
+  theme(legend.title = element_blank())
+
+
+##variabilité intra-jardin pour le chant
+# Filtrage des données pour ne garder que les lignes où 'diff' vaut J_1 à J_4
+Donnees_filtrees <- Donnees_complet %>%
+  filter(diff %in% c("J_1", "J_2", "J_3", "J_4"))
+# Création des groupes de triplet de str (pré, diff et post diff)
+Donnees_complet_str <- Donnees_filtrees %>%
+  pivot_longer(cols = c(str_pre, str_diff, str_post_diff),
+               names_to = "moment_chant", 
+               values_to = "valeur") %>%
+  mutate(moment_chant = factor(moment_chant, levels = c("str_pre", "str_diff", "str_post_diff")),
+         diff = factor(diff, levels = c("J_1", "J_2", "J_3", "J_4")))  # Pour avoir le bon ordre
+# Graphique avec l’axe x comme les J_1 à J_4 et les str différenciés par la couleur
+ggplot(Donnees_complet_str, aes(x = diff, y = valeur, fill = moment_chant)) +
+  geom_boxplot(position = position_dodge(width = 0.75)) +
+  theme_minimal() +
+  labs(title = "Nb de str selon les conditions J_1 à J_4",
+       x = "Condition (J_1 à J_4)", y = "Valeur") +
+  theme(legend.title = element_blank())
+
+
+##Variabilité intra-témoin pour le chant
+# Filtrage des données pour ne garder que les lignes où 'diff' vaut T_1 à T_4
+Donnees_filtrees <- Donnees_complet %>%
+  filter(diff %in% c("T_1", "T_2", "T_3", "T_4"))
+# Création des groupes de triplet de str (pré, diff et post diff)
+Donnees_complet_str <- Donnees_filtrees %>%
+  pivot_longer(cols = c(str_pre, str_diff, str_post_diff),
+               names_to = "moment_chant", 
+               values_to = "valeur") %>%
+  mutate(moment_chant = factor(moment_chant, levels = c("str_pre", "str_diff", "str_post_diff")),
+         diff = factor(diff, levels = c("T_1", "T_2", "T_3", "T_4")))  # Pour avoir le bon ordre
+# Graphique avec l’axe x comme les T_1 à T_4 et les str différenciés par la couleur
+ggplot(Donnees_complet_str, aes(x = diff, y = valeur, fill = moment_chant)) +
+  geom_boxplot(position = position_dodge(width = 0.75)) +
+  theme_minimal() +
+  labs(title = "Nb de str selon les conditions T_1 à T_4",
+       x = "Condition (T_1 à T_4)", y = "Valeur") +
+  theme(legend.title = element_blank())
+```
+
+On observe des différences mais il faut vérif si elles sont significatives et si le comportement varie bien, pas uniquement le chant, ie il faut mieux utiliser un score d'activité (Axe 1 ed l'ACP 'activité des fauvettes') plutot que les str émis par les fauvettes
+
+Avec les scores d'activité (axe 1 de l'ACP) et avec des tests statistiques:
+
+```{r}
+
+##Variabilité intra-complet par axe 1 de l'ACP
+# Filtrage des données dans Donnees_complet
+Donnees_filtrees <- Donnees_ACP %>%
+  filter(diff %in% c("C_1", "C_2", "C_3", "C_4"))
+#Création du boxplot
+ggplot(Donnees_filtrees, aes(x = diff, y = dist_lat_strophe_survol, fill = diff)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(
+    title = "Score d'activité (Axe 1) pour les diffusions C_1 à C_4",
+    x = "Diffusion du Complet",
+    y = "Axe 1 : Dmin, latence, str, survol"
+  ) +
+  theme(legend.position = "none")
+#Test statisique
+modele_lm_C <- lm(Donnees_filtrees$dist_lat_strophe_survol ~ diff , data = Donnees_filtrees)
+modele_lm_C
+summary(modele_lm_C)
+performance::check_normality(modele_lm_C)
+performance::check_heteroskedasticity(modele_lm_C)
+performance::check_model(modele_lm_C)
+pairs(emmeans(modele_lm_C, "diff"))
+
+
+##Variabilité intra-gazoulli par axe 1 de l'ACP
+# Filtrage des données dans Donnees_complet
+Donnees_filtrees <- Donnees_ACP %>%
+  filter(diff %in% c("G_1", "G_2", "G_3", "G_4"))
+#Création du boxplot
+ggplot(Donnees_filtrees, aes(x = diff, y = dist_lat_strophe_survol, fill = diff)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(
+    title = "Score d'activité (Axe 1) pour les diffusions G_1 à G_4",
+    x = "Diffusion du Gazoulli",
+    y = "Axe 1 : Dmin, latence, str, survol"
+  ) +
+  theme(legend.position = "none")
+#Test statisique
+modele_lm_G <- lm(Donnees_filtrees$dist_lat_strophe_survol ~ diff , data = Donnees_filtrees)
+modele_lm_G
+summary(modele_lm_G)
+performance::check_normality(modele_lm_G)
+performance::check_heteroskedasticity(modele_lm_G)
+performance::check_model(modele_lm_G)
+pairs(emmeans(modele_lm_G, "diff"))
+
+
+##Variabilité intra-Sifflement par axe 1 de l'ACP
+# Filtrage des données dans Donnees_complet
+Donnees_filtrees <- Donnees_ACP %>%
+  filter(diff %in% c("S_1", "S_2", "S_3", "S_4"))
+#Création du boxplot
+ggplot(Donnees_filtrees, aes(x = diff, y = dist_lat_strophe_survol, fill = diff)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(
+    title = "Score d'activité (Axe 1) pour les diffusions S_1 à S_4",
+    x = "Diffusion du Sifflement",
+    y = "Axe 1 : Dmin, latence, str, survol"
+  ) +
+  theme(legend.position = "none")
+#Test statisique
+modele_lm_S <- lm(Donnees_filtrees$dist_lat_strophe_survol ~ diff , data = Donnees_filtrees)
+modele_lm_S
+summary(modele_lm_S)
+performance::check_normality(modele_lm_S)
+performance::check_heteroskedasticity(modele_lm_S)
+performance::check_model(modele_lm_S)
+pairs(emmeans(modele_lm_S, "diff"))
+
+
+##Variabilité intra-grizette par axe 1 de l'ACP
+# Filtrage des données dans Donnees_complet
+Donnees_filtrees <- Donnees_ACP %>%
+  filter(diff %in% c("Gr_1", "Gr_2", "Gr_3", "Gr_4"))
+#Création du boxplot
+ggplot(Donnees_filtrees, aes(x = diff, y = dist_lat_strophe_survol, fill = diff)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(
+    title = "Score d'activité (Axe 1) pour les diffusions Gr_1 à Gr_4",
+    x = "Diffusion du Grizette",
+    y = "Axe 1 : Dmin, latence, str, survol"
+  ) +
+  theme(legend.position = "none")
+#Test statisique
+modele_lm_Gr <- lm(Donnees_filtrees$dist_lat_strophe_survol ~ diff , data = Donnees_filtrees)
+modele_lm_Gr
+summary(modele_lm_Gr)
+performance::check_normality(modele_lm_Gr)
+performance::check_heteroskedasticity(modele_lm_Gr)
+performance::check_model(modele_lm_Gr)
+pairs(emmeans(modele_lm_Gr, "diff"))
+
+
+
+##Variabilité intra-jardin par axe 1 de l'ACP
+# Filtrage des données dans Donnees_complet
+Donnees_filtrees <- Donnees_ACP %>%
+  filter(diff %in% c("J_1", "J_2", "J_3", "J_4"))
+#Création du boxplot
+ggplot(Donnees_filtrees, aes(x = diff, y = dist_lat_strophe_survol, fill = diff)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(
+    title = "Score d'activité (Axe 1) pour les diffusions J_1 à J_4",
+    x = "Diffusion du Jardin",
+    y = "Axe 1 : Dmin, latence, str, survol"
+  ) +
+  theme(legend.position = "none")
+#Test statisique
+modele_lm_J <- lm(Donnees_filtrees$dist_lat_strophe_survol ~ diff , data = Donnees_filtrees)
+modele_lm_J
+summary(modele_lm_J)
+performance::check_normality(modele_lm_J)
+performance::check_heteroskedasticity(modele_lm_J)
+performance::check_model(modele_lm_J)
+pairs(emmeans(modele_lm_J, "diff"))
+
+
+##Variabilité intra-témoin par axe 1 de l'ACP
+# Filtrage des données dans Donnees_complet
+Donnees_filtrees <- Donnees_ACP %>%
+  filter(diff %in% c("T_1", "T_2", "T_3", "T_4"))
+#Création du boxplot
+ggplot(Donnees_filtrees, aes(x = diff, y = dist_lat_strophe_survol, fill = diff)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(
+    title = "Score d'activité (Axe 1) pour les diffusions T_1 à T_4",
+    x = "Diffusion du Témoin",
+    y = "Axe 1 : Dmin, latence, str, survol"
+  ) +
+  theme(legend.position = "none")
+#Test statisique
+modele_lm_T <- lm(Donnees_filtrees$dist_lat_strophe_survol ~ diff , data = Donnees_filtrees)
+modele_lm_T
+summary(modele_lm_T)
+performance::check_normality(modele_lm_T)
+performance::check_heteroskedasticity(modele_lm_T)
+performance::check_model(modele_lm_T)
+pairs(emmeans(modele_lm_T, "diff"))
+```
+
+Pour faire un test statistique, il nous faut la distribution de l'axe 1 car elle n'est peut etre pas normale, poisonnienne...
+
+```{r}
+ggplot(Donnees_ACP, aes(x = dist_lat_strophe_survol)) +
+  geom_histogram(binwidth = 0.5, fill = "red", color = "white") +
+  labs(title = "Distribution de l'axe 1 de l'ACP ", x = "Valeurs", y = "Fréquence") 
+
+```
+
+Donc l'axe 1 (score d'activité = Dmin, latence, str, survol) suit une loi de poisson déformé en -2.5. Cela permetrait de faire des test statiqtique en non paramétrique (glm) avec comme distribution une poisson déformé en -2.5, et cela si et seulement si un test paramétrique (lm) ne voit pas ses hypothèses vérifiés.
+
+Finalement , les hypothèses des test linéaires sont vérifiés (sauf pour 1) et on observe une variation intra-chant vis-à-vis d'une réponse (indice 1) pour les chants suivants :
+
+\* : C_1, C_4, G_4, S_1, T_1
+
+. : S_2
+
+Attention aux biais !!! G_4 est différent car que 4 mesures qui sont en plus pas ouf car pas de réaction.
+
+Les oiseaux n'étant pas bagués et les territoires pouvant être chevauchants, l'identification précise de certains mâles pouvait être compliquée.
+
+# Conclusion
+
+Les 2 méthodes pour scorer l'activité des fauvettes (indice d'activité issue de l'ACP et indice énergétique) nous permettent d'obtenir les mêmes résultats :
+
+-\> Il y a un effet du chant diffusé sur la réponse de la fauvette lorsque ce chant diffusé est Complet, Jardin et Sifflement (pour grizette, p-value = 0.08 mais uniquement en utilisant l'indice 1 de l'ACP donc pas significatif car pas robuste)
+
+-\> Il y a un effet de la météo uniquement lorsque l'on utilise l'indice 1 issue de l'ACP 'météo', i.e. uniquement lorsque l'on utilise comme paramètres la température, le vent et l'humidité. Pour la pluie et l'ensoleillement, l'effet n'est pas significatif.
+
+-\> les résultats de l'indice d'énergie de réponse correspond à ce que nous avons remarqué sur le terrain, c'est-à-dire un pic d'activité dans la matinés.
+
+REMARQUE : dans le cas de l'indice énergétique en fonction de la météo, les hypothèses des tests linéaires ne sont pas vérifiées, il faudrait faire des tests non paramétriques pour essayer de conclure.
+
+# Ouverture
+
+Modèle mixte en prenant en compte les jours.
+
+On pourrait analyser le son pour essayer de trouver des signatures, par exemple d'ultra-dominance pouvant expliquer la variabilité intra-son.
+
+On pourrait analyser le chant de réponse, notament car nous avons remarqué que suite à une diffusion sifflement, les fauvettes à têtes noires semblaient répondre uniquement par des sifflements.
+
+On aurait également pu caractériser les réponses en fonction d'un paramètre "perturbateur", par exemple en prenant en compte les chants des merles pouvant être à promiscuité.

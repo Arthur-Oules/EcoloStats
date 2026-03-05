@@ -1,0 +1,15 @@
+Ce projet est constitué d'un dossier "data", qui contient les tableaux de données, et d'un dossier "Scripts", qui contient les codes et quelques graphiques ou tableaux intermédiaires.
+
+Les 3 codes correspondent à 3 axes de réflexions :
+
+- Un premier axe qui vise à caractériser les communautés d'herbacées (700 lignes)
+- Un deuxième axe dont le but est d'étudier l'influence des paramètres du milieu sur la biodiversité alpha et béta (400 lignes)
+- Un troisème axe qui porte sur les stratégies CSR des herbacées (300 lignes)
+
+L'axe 3 utilise le document "TabHerbaceesEspeces.csv" ainsi que le document "TabReduitEspece.csv" générés dans l'axe 1. Il est donc recommandé, si ces documents ne sont pas déjà présents, d'exécuter le script de l'axe 1 avant d'exécuter le script de l'axe 3.
+
+Les packages appelés par la fonction library() en début de chaque axe doivent être installés avant.
+
+Pour ouvrir le projet dans Rstudio, aller dans File > Open Project > Code-sous-bois.Rproj
+
+Auteurs du projet : Bugaud Noé, Garrot Mathis, Gaudé Elise, Prunier Maëlle

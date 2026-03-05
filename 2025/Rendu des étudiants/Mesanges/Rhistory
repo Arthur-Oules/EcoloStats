@@ -1,0 +1,512 @@
+textsize = 5
+) +
+stat_compare_means(method = "wilcox.test", label = "p.signif")
+temoin_bleu_BC <- data.frame()
+temoin_bleue_BC <- data.frame(matrix(ncol = 0, nrow = nrow(construction_temoin_bleue)))
+temoin_bleue_BC$Catégorie <- rep("Témoin", nrow(temoin_bleue_BC))
+temoin_bleue_BC$Taux <- round(construction_temoin_bleue$Court_pre / construction_temoin_bleue$somme_bleue_pre, 2)
+construction_postBC_bleue <- data_mesanges_modifiee[data_mesanges_modifiee$somme_bleue_post != 0 & data_mesanges_modifiee$Son == "BC", ] %>% select(c("Court_post", "somme_bleue_post"))
+donnee_bleue_BC <- data.frame()
+donnee_bleue_BC <- data.frame(matrix(ncol = 0, nrow = nrow(construction_postBC_bleue)))
+donnee_bleue_BC$Catégorie <- rep("Imitation BC", nrow(donnee_bleue_BC))
+donnee_bleue_BC$Taux <- round(construction_postBC_bleue$Court_post / construction_postBC_bleue$somme_bleue_post, 2)
+imit_BC <- rbind(temoin_bleue_BC, donnee_bleue_BC)
+wilcox_test(data = imit_BC, formula = Taux ~ Catégorie,exact=FALSE)
+imit_BC$Catégorie <- factor(imit_BC$Catégorie, levels = c("Témoin", "Imitation BC"))
+plot_BC <- ggplot(imit_BC, aes(x = Catégorie, y = Taux)) +
+geom_boxplot() +
+xlab("Catégorie") +
+ylab("Taux d'imitation") +
+scale_y_continuous(limits = c(0, 1.2),  breaks = seq(0, 1, by = 0.2)) +
+ggtitle("Après BC") +
+geom_signif(
+comparisons = list(c("Témoin", "Imitation BC")),
+map_signif_level = TRUE,
+y_position = max(imit_BC$Taux) + 0.1,
+size = 1,
+textsize = 5
+) +
+stat_compare_means(method = "wilcox.test", label = "p.signif")
+temoin_bleu_BL <- data.frame()
+temoin_bleue_BL <- data.frame(matrix(ncol = 0, nrow = nrow(construction_temoin_bleue)))
+temoin_bleue_BL$Catégorie <- rep("Témoin", nrow(temoin_bleue_BL))
+temoin_bleue_BL$Taux <- round(construction_temoin_bleue$Long_pre / construction_temoin_bleue$somme_bleue_pre, 2)
+construction_postBL_bleue <- data_mesanges_modifiee[data_mesanges_modifiee$somme_bleue_post != 0 & data_mesanges_modifiee$Son == "BL", ] %>% select(c("Long_post", "somme_bleue_post"))
+donnee_bleue_BL <- data.frame()
+donnee_bleue_BL <- data.frame(matrix(ncol = 0, nrow = nrow(construction_postBL_bleue)))
+donnee_bleue_BL$Catégorie <- rep("Imitation BL", nrow(donnee_bleue_BL))
+donnee_bleue_BL$Taux <- round(construction_postBL_bleue$Long_post / construction_postBL_bleue$somme_bleue_post, 2)
+imit_BL <- rbind(temoin_bleue_BL, donnee_bleue_BL)
+wilcox_test(data = imit_BC, formula = Taux ~ Catégorie,exact=FALSE)
+imit_BL$Catégorie <- factor(imit_BL$Catégorie, levels = c("Témoin", "Imitation BL"))
+plot_BL <- ggplot(imit_BL, aes(x = Catégorie, y = Taux)) +
+geom_boxplot() +
+xlab("Catégorie") +
+ylab("Taux d'imitation") +
+scale_y_continuous(limits = c(0, 1.2),  breaks = seq(0, 1, by = 0.2)) +
+ggtitle("Après BL") +
+geom_signif(
+comparisons = list(c("Témoin", "Imitation BL")),
+map_signif_level = TRUE,
+y_position = max(imit_BL$Taux) + 0.1,
+size = 1,
+textsize = 5
+) +
+stat_compare_means(method = "wilcox.test", label = "p.signif")
+ggarrange(plot_BS, plot_BC, plot_BL,
+ncol = 3, nrow = 1)
+data_mesanges_duree <- data.frame(data_mesanges$Jour,data_mesanges$Minute,data_mesanges$Nombre_passage,data_mesanges$Vu_charbo,data_mesanges$Post_2,data_mesanges$Post_3,data_mesanges$Pre_2,data_mesanges$Pre_3,data_mesanges$Vu_bleue,data_mesanges$Sans_trilles_pre,data_mesanges$Sans_trilles_post,data_mesanges$Court_pre,data_mesanges$Court_post,data_mesanges$Long_pre,data_mesanges$Long_post)
+colnames(data_mesanges_duree) <- c("Jour","Minute","Nombre_passage","Vu_charbo","Post_2","Post_3","Pre_2","Pre_3","Vu_bleue","Sans_trilles_pre","Sans_trilles_post","Court_pre","Court_post","Long_pre","Long_post")
+data_mesanges_duree$Post_charbo <- as.numeric(data_mesanges_duree$Post_2) +as.numeric(data_mesanges_duree$Post_3)
+data_mesanges_duree$Pre_charbo <- as.numeric(data_mesanges_duree$Pre_3) +as.numeric(data_mesanges_duree$Pre_2)
+data_mesanges_duree$Post_bleue <- as.numeric(data_mesanges_duree$Court_post) +as.numeric(data_mesanges_duree$Long_post)+as.numeric(data_mesanges_duree$Sans_trilles_post)
+data_mesanges_duree$Pre_bleue <- as.numeric(data_mesanges_duree$Court_pre) +as.numeric(data_mesanges_duree$Long_pre)+as.numeric(data_mesanges_duree$Sans_trilles_pre)
+data_mesanges_duree$duree <- data_mesanges_modifiee$temps_total
+data_mesanges_duree$Jour <- as.factor(data_mesanges_duree$Jour)
+data_mesanges_duree_Post_charbo <-  data_mesanges_duree %>%
+filter(Vu_charbo == 1 | Post_charbo > 0)
+ggplot(data_mesanges_duree_Post_charbo, aes(duree, Post_charbo, colour = data_mesanges_duree_Post_charbo$Jour, )) +
+geom_point(show.legend = TRUE) +
+ylab("Nombre de strophes chantées par une mésange\n charbonnière après diffusion") +
+xlab("Durée en min") +
+ggtitle("Attenuation au cours de l'expérience du nombre de strophes\n chantées par les mésanges charbonnières")
+data_test <- data.frame(c("Post_charbo_jour_1", "Post_charbo_jour_2", "Post_charbo_jour_3", "Post_charbo_jour_4", "Pre_charbo_jour_1", "Pre_charbo_jour_2", "Pre_charbo_jour_3", "Pre_charbo_jour_4", "Post_bleue_jour_1", "Post_bleue_jour_2", "Post_bleue_jour_3", "Post_bleue_jour_4", "Pre_bleue_jour_1", "Pre_bleue_jour_2", "Pre_bleue_jour_3", "Pre_bleue_jour_4"), c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0), c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))
+colnames(data_test) <- c("Condition", "Variation_interjour", "Variation_intrajour")
+# Création du modèle linéaire et extraction des résidus
+lm1 <- lm(Post_charbo ~ Jour, data_mesanges_duree)
+residus1 <- resid(lm1)
+# Tracer du graphe comparant la distribution des résidus à une gaussienne
+ggplot(data_mesanges_duree, aes(x = residus1)) +
+geom_density(fill = "lightgreen", alpha = 0.5) +
+stat_function(
+fun = dnorm,
+args = list(
+mean = mean(data_mesanges_duree$Post_charbo, na.rm = TRUE),
+sd = sd(data_mesanges_duree$Post_charbo, na.rm = TRUE)),
+color = "red",
+size = 1) +
+ggtitle("Courbe de densité de nombre de strophes après diffusion par rapport à une Gaussienne") +
+xlab("Valeurs de nombre de strophes après diffusion") +
+ylab("Densité") +
+theme(plot.title = element_text(size = 10, hjust = 0.5))
+# Test de Shapiro-Wilk pour la normalité
+shapiro.test(residus1)
+kruskal.test(Post_charbo ~ Jour, data_mesanges_duree)
+data_test$Variation_interjour[1:4] <- kruskal.test(Post_charbo ~ Jour, data_mesanges_duree)$p.value
+nb_classe = mean(c(44, 83-44, 139-108)) %>% sqrt() %>% as.integer()
+sort_min <- sort(data_mesanges_duree[data_mesanges_duree$Jour %in% c(1, 2, 4), "Minute"])
+sort_min <- unique(sort_min)
+t1 <- sort_min[as.integer(length(sort_min)/nb_classe)]
+t2 <- sort_min[as.integer(length(sort_min)/nb_classe) *2]
+t3 <- sort_min[as.integer(length(sort_min)/nb_classe) *3]
+t4 <- sort_min[as.integer(length(sort_min)/nb_classe) *4]
+t5 <- sort_min[as.integer(length(sort_min)/nb_classe) *5]
+data_mesanges_duree[, "Plage_temps"] = NA
+for (i in 1:139){
+if(data_mesanges_duree$Minute[i] <= t1){
+data_mesanges_duree$Plage_temps[i] = 1
+}
+if(data_mesanges_duree$Minute[i] > t1 && data_mesanges_duree$Minute[i] <= t2){
+data_mesanges_duree$Plage_temps[i] = 2
+}
+if(data_mesanges_duree$Minute[i] > t2 && data_mesanges_duree$Minute[i] <= t3){
+data_mesanges_duree$Plage_temps[i] = 3
+}
+if(data_mesanges_duree$Minute[i] > t3 && data_mesanges_duree$Minute[i] <= t4){
+data_mesanges_duree$Plage_temps[i] = 4
+}
+if(data_mesanges_duree$Minute[i] > t4 && data_mesanges_duree$Minute[i] <= t5){
+data_mesanges_duree$Plage_temps[i] = 5
+}
+if(data_mesanges_duree$Minute[i] > t5){
+data_mesanges_duree$Plage_temps[i] = 6
+}
+}
+data_mesanges_duree %>%
+group_by(Jour) %>%
+summarise(p_value = kruskal.test(Post_charbo ~ Plage_temps)$p.value)
+# Étape 1 : extraire les p-values par jour
+jours <- unique(data_mesanges_duree$Jour)
+for (j in jours) {
+# Sous-ensemble des données pour un jour donné
+df_jour <- subset(data_mesanges_duree, Jour == j)
+# Effectuer le test Kruskal-Wallis, gérer les erreurs
+p_val <- kruskal.test(Post_charbo ~ Plage_temps, data = df_jour)$p.value
+# Nom à rechercher dans data_test
+condition_name <- paste0("Post_charbo_jour_", j)
+# Mettre la p-value dans la colonne Variation_intrajour
+data_test$Variation_intrajour[data_test$Condition == condition_name] <- p_val
+}
+data_mesanges_duree_Pre_charbo <-  data_mesanges_duree %>%
+filter(Vu_charbo == 1 | Pre_charbo > 0)
+ggplot(data_mesanges_duree_Pre_charbo,aes(duree,Pre_charbo, colour = Jour)) +
+geom_point(show.legend = TRUE) +
+ylab("Nombre de strophes chantées par\n une mésanges charbonnière avant diffusion") +
+xlab("Durée en min") +
+ggtitle("Attenuation au cours de l'expérience du nombre de strophes\n chantées par les charbonnières avant diffusion") +
+theme(plot.title = element_text(size = 10, hjust = 0.5))
+# Création du modèle linéaire et extraction des résidus
+lm2 <- lm(Pre_charbo ~ Jour, data_mesanges_duree)
+residus2 <- resid(lm2)
+# Tracer du graphe comparant la distribution des résidus à une gaussienne
+ggplot(data_mesanges_duree, aes(x = residus2)) +
+geom_density(fill = "lightgreen", alpha = 0.5) +
+stat_function(
+fun = dnorm,
+args = list(
+mean = mean(data_mesanges_duree$Pre_charbo, na.rm = TRUE),
+sd = sd(data_mesanges_duree$Pre_charbo, na.rm = TRUE)),
+color = "red",
+size = 1) +
+ggtitle("Courbe de densité de nombre de strophes avant diffusion par rapport à une Gaussienne") +
+xlab("Valeurs de nombre de strophes avant diffusion") +
+ylab("Densité") +
+theme(plot.title = element_text(size = 10, hjust = 0.5))
+# Test de Shapiro-Wilk pour la normalité
+shapiro.test(residus2)
+kruskal.test(Pre_charbo ~ Jour, data_mesanges_duree)
+data_test$Variation_interjour[5:8] <- kruskal.test(Pre_charbo ~ Jour, data_mesanges_duree)$p.value
+data_mesanges_duree %>%
+group_by(Jour) %>%
+summarise(p_value = kruskal.test(Pre_charbo ~ Plage_temps)$p.value)
+# Étape 1 : extraire les p-values par jour
+jours <- unique(data_mesanges_duree$Jour)
+for (j in jours) {
+# Sous-ensemble des données pour un jour donné
+df_jour <- subset(data_mesanges_duree, Jour == j)
+# Effectuer le test Kruskal-Wallis, gérer les erreurs
+p_val <- kruskal.test(Pre_charbo ~ Plage_temps, data = df_jour)$p.value
+# Nom à rechercher dans data_test
+condition_name <- paste0("Pre_charbo_jour_", j)
+# Mettre la p-value dans la colonne Variation_intrajour
+data_test$Variation_intrajour[data_test$Condition == condition_name] <- p_val
+}
+data_mesanges_duree_Post_bleue <-  data_mesanges_duree %>%
+filter(Vu_bleue == 1 | Post_bleue > 0)
+ggplot(data_mesanges_duree_Post_bleue, aes(duree, Post_bleue, colour = Jour)) +
+geom_point(show.legend = TRUE) +
+ylab("Nombre de strophes chantées par\n une mésanges bleue après diffusion") +
+xlab("Durée en min") +
+ggtitle("Attenuation au cours de l'expérience du nombre de strophes") +
+theme(plot.title = element_text(size = 10, hjust = 0.5))
+# Création du modèle linéaire et extraction des résidus
+lm3 <- lm(Post_bleue~Jour,data_mesanges_duree)
+residus3 <- resid(lm3)
+# Tracer du graphe comparant la distribution des résidus à une gaussienne
+ggplot(data_mesanges_duree, aes(x = residus3)) +
+geom_density(fill = "lightgreen", alpha = 0.5) +
+stat_function(
+fun = dnorm,
+args = list(
+mean = mean(data_mesanges_duree$Post_bleue, na.rm = TRUE),
+sd = sd(data_mesanges_duree$Post_bleue, na.rm = TRUE)),
+color = "red",
+size = 1) +
+ggtitle("Courbe de densité de nombre de strophes après diffusion par rapport à une Gaussienne") +
+xlab("Valeurs de nombre de strophes après diffusion") +
+ylab("Densité") +
+theme(plot.title = element_text(size = 10, hjust = 0.5))
+# Test de Shapiro-Wilk pour la normalité
+shapiro.test(residus3)
+kruskal.test(Post_bleue ~ Jour, data_mesanges_duree)
+data_test$Variation_interjour[9:12] <- kruskal.test(Post_bleue ~ Jour, data_mesanges_duree)$p.value
+data_mesanges_duree %>%
+group_by(Jour) %>%
+summarise(p_value = kruskal.test(Post_bleue ~ Plage_temps)$p.value)
+# Étape 1 : extraire les p-values par jour
+jours <- unique(data_mesanges_duree$Jour)
+for (j in jours) {
+# Sous-ensemble des données pour un jour donné
+df_jour <- subset(data_mesanges_duree, Jour == j)
+# Effectuer le test Kruskal-Wallis, gérer les erreurs
+p_val <- kruskal.test(Post_bleue ~ Plage_temps, data = df_jour)$p.value
+# Nom à rechercher dans data_test
+condition_name <- paste0("Post_bleue_jour_", j)
+# Mettre la p-value dans la colonne Variation_intrajour
+data_test$Variation_intrajour[data_test$Condition == condition_name] <- p_val
+}
+data_mesanges_duree_Pre_bleue <-  data_mesanges_duree %>%
+filter(Vu_bleue == 1 | Pre_bleue > 0)
+ggplot(data_mesanges_duree_Pre_bleue, aes(duree, Pre_bleue, colour = Jour)) +
+geom_point(show.legend = TRUE) +
+ylab("Nombre de strophes chantées par\n une mésanges bleue avant diffusion") +
+xlab("Durée en min") +
+ggtitle("Attenuation au cours de l'expérience du nombre de strophes") +
+theme(plot.title = element_text(size = 10, hjust = 0.5))
+# Création du modèle linéaire et extraction des résidus
+lm4 <- lm(Pre_bleue~Jour,data_mesanges_duree)
+residus4 <- resid(lm4)
+# Tracer du graphe comparant la distribution des résidus à une gaussienne
+ggplot(data_mesanges_duree, aes(x = residus4)) +
+geom_density(fill = "lightgreen", alpha = 0.5) +
+stat_function(
+fun = dnorm,
+args = list(
+mean = mean(data_mesanges_duree$Pre_bleue, na.rm = TRUE),
+sd = sd(data_mesanges_duree$Pre_bleue, na.rm = TRUE)),
+color = "red",
+size = 1) +
+ggtitle("Courbe de densité de nombre de strophes avant diffusion par rapport à une Gaussienne")+
+xlab("Valeurs de nombre de strophes avant diffusion") +
+ylab("Densité") +
+theme(plot.title = element_text(size = 10, hjust = 0.5))
+# Test de Shapiro-Wilk pour la normalité
+shapiro.test(residus4)
+kruskal.test(Pre_bleue ~ Jour, data_mesanges_duree)
+data_test$Variation_interjour[13:16] <- kruskal.test(Pre_bleue ~ Jour, data_mesanges_duree)$p.value
+data_mesanges_duree %>%
+group_by(Jour) %>%
+summarise(p_value = kruskal.test(Pre_charbo ~ Plage_temps)$p.value)
+# Étape 1 : extraire les p-values par jour
+jours <- unique(data_mesanges_duree$Jour)
+for (j in jours) {
+# Sous-ensemble des données pour un jour donné
+df_jour <- subset(data_mesanges_duree, Jour == j)
+# Effectuer le test Kruskal-Wallis, gérer les erreurs
+p_val <- kruskal.test(Pre_bleue ~ Plage_temps, data = df_jour)$p.value
+# Nom à rechercher dans data_test
+condition_name <- paste0("Pre_bleue_jour_", j)
+# Mettre la p-value dans la colonne Variation_intrajour
+data_test$Variation_intrajour[data_test$Condition == condition_name] <- p_val
+}
+print(data_test)
+data_mesanges_duree$Jour <- as.factor(data_mesanges_duree$Jour)
+jours <- unique(data_mesanges_duree$Jour)
+# Création d'un data frame qui contiendra les fréquences et nombres de présence par jour
+data_frequence <- data.frame(
+Jour = jours,
+N_presence = numeric(length(jours)),
+N_absence = numeric(length(jours)),
+Frequence_presence = numeric(length(jours)),
+Frequence_absence = numeric(length(jours)))
+# Correction du jour 3 puisqu'il n'y a eu qu'une demie journée d'échantillonnage.
+for (k in seq_along(jours)) {
+j <- jours[k]
+df_jour <- subset(data_mesanges_duree, Jour == j)
+N_passage_jour <- max(df_jour$Nombre_passage)
+if (k==3) {
+N_pres <- 2*sum(df_jour$Vu_charbo == 1, na.rm = TRUE)
+N_total <- nrow(df_jour)}
+else {
+N_pres <- sum(df_jour$Vu_charbo == 1, na.rm = TRUE)
+N_total <- nrow(df_jour)}
+# Remplissage du tableau
+data_frequence$N_presence[k] <- N_pres
+data_frequence$N_absence[k] <- N_total - N_pres
+data_frequence$Frequence_presence[k] <- N_pres / N_total
+data_frequence$Frequence_absence[k] <- 1 - (N_pres / N_total)}
+# Histogramme
+ggplot(data_frequence, aes(x = Jour, y=Frequence_presence, fill= Jour)) +
+geom_bar(stat="identity", color="black") +
+ggtitle( "Fréquence de la présence des mésanges charbonnières\n (vues) au cours des jours") +
+xlab("Jour") +
+ylab("Fréquence des présences\n des mésanges charbonnières") +
+scale_fill_manual(values = c("1" = "#00CD00", "2" = "hotpink2", "3" = "#EE2C2C", "4" = "#00BFFF"))
+tableau = matrix(c(data_frequence$N_presence, data_frequence$N_absence), 2, 4, byrow=T)
+khi_test = chisq.test(tableau)
+khi_test
+modele_presence <- glm(Vu_charbo ~ Jour, data = data_mesanges_duree, family = "binomial")
+summary(modele_presence)
+df_latence <- data_mesanges_modifiee %>% select(c("Latence_approche_charbo", "Latence_chant_charbo", "Latence_approche_bleue", "Latence_chant_bleue"))
+df_latence <- as.data.frame(bind_cols(data_mesanges_modifiee["Jour"], data_mesanges_duree["duree"], data_mesanges_modifiee["Nombre_passage"], data_mesanges_modifiee["Son"], sweep (df_latence, 2, 60, "-")))
+box_lat_app_charbo <- ggplot(df_latence, aes(x = Jour, y = Latence_approche_charbo)) +
+geom_boxplot() +
+xlab("Jour") +
+ylab("Latence de l'approche (sec)") +
+ggtitle("Approche charbo")
+box_lat_chant_charbo <- ggplot(df_latence, aes(x = Jour, y = Latence_chant_charbo)) +
+geom_boxplot() +
+xlab("Jour") +
+ylab("Latence du chant (en sec)") +
+ggtitle("Chant charbo")
+box_lat_app_bleue <- ggplot(df_latence, aes(x = Jour, y = Latence_approche_bleue)) +
+geom_boxplot() +
+xlab("Jour") +
+ylab("Latence de l'approche (en sec)") +
+ggtitle("Approche bleues")
+box_lat_chant_bleue <- ggplot(df_latence, aes(x = Jour, y = Latence_chant_bleue)) +
+geom_boxplot() +
+xlab("Jour") +
+ylab("Latence du chant (en sec)") +
+ggtitle("Chant bleues")
+ggarrange(box_lat_app_charbo, box_lat_chant_charbo, box_lat_app_bleue, box_lat_chant_bleue,
+ncol = 2, nrow = 2)
+point_lat_app_charbo <- ggplot(df_latence, aes(x = duree, y = Latence_approche_charbo, colour = Jour)) +
+geom_point() +
+xlab("Minutes depuis le debut\n des observations") +
+ylab("Latence du chant\n  (en sec)") +
+ggtitle("Approche charbo")
+point_lat_chant_charbo <- ggplot(df_latence, aes(x = duree, y = Latence_chant_charbo, colour = Jour)) +
+geom_point() +
+xlab("Minutes depuis le debut\n des observations") +
+ylab("Latence du chant\n  (en sec)") +
+ggtitle("Chant charbo")
+point_lat_app_bleue <- ggplot(df_latence, aes(x = duree, y = Latence_approche_bleue, colour = Jour)) +
+geom_point() +
+xlab("Minutes depuis le debut\n des observations") +
+ylab("Latence du chant\n  (en sec)") +
+ggtitle("Approche bleues")
+point_lat_chant_bleue <- ggplot(df_latence, aes(x = duree, y = Latence_chant_bleue, colour = Jour)) +
+geom_point() +
+xlab("Minutes depuis le debut\n des observations") +
+ylab("Latence du chant\n  (en sec)") +
+ggtitle("Chant bleues")
+ggarrange(point_lat_app_charbo, point_lat_chant_charbo, point_lat_app_bleue, point_lat_chant_bleue,
+ncol = 2, nrow = 2)
+hist(df_latence$Latence_chant_charbo, main="Distribution des latences de chants\n (lorsque la mésange a chanté)", xlab="Latence du chant (en secondes)", ylab="Occurence")
+shapiro.test(df_latence$Latence_chant_charbo) # on rejette l'hypothese d'une distribution normale
+WT_app_charbo_J <- wilcox_test(data = df_latence, formula = Latence_approche_charbo ~ Jour)
+WT_chant_charbo_J <- wilcox_test(data = df_latence, formula = Latence_chant_charbo ~ Jour)
+WT_app_bleue_J <- wilcox_test(data = df_latence, formula = Latence_approche_bleue ~ Jour)
+WT_chant_bleue_J <- wilcox_test(data = df_latence, formula = Latence_chant_bleue ~ Jour)
+WT_app_charbo_J
+WT_chant_charbo_J
+WT_app_bleue_J
+WT_chant_bleue_J
+WT_app_charbo_Son <- wilcox_test(data = df_latence, formula = Latence_approche_charbo ~ Son)
+WT_chant_charbo_Son <- wilcox_test(data = df_latence, formula = Latence_chant_charbo ~ Son)
+WT_app_bleue_Son <- wilcox_test(data = df_latence, formula = Latence_approche_bleue ~ Son)
+WT_chant_bleue_Son <- wilcox_test(data = df_latence, formula = Latence_chant_bleue ~ Son)
+WT_app_charbo_Son
+WT_chant_charbo_Son
+WT_app_bleue_Son
+WT_chant_bleue_Son
+df_latence$Plage_temps <- data_mesanges_duree$Plage_temps
+WT_app_charbo_Plage_temps <- wilcox_test(data = df_latence, formula = Latence_approche_charbo ~ Plage_temps)
+WT_chant_charbo_Plage_temps <- wilcox_test(data = df_latence, formula = Latence_chant_charbo ~ Plage_temps)
+WT_app_bleue_Plage_temps <- wilcox_test(data = df_latence, formula = Latence_approche_bleue ~ Plage_temps)
+WT_chant_bleue_Plage_temps <- wilcox_test(data = df_latence, formula = Latence_chant_bleue ~ Plage_temps)
+WT_app_charbo_Plage_temps
+WT_chant_charbo_Plage_temps
+WT_app_bleue_Plage_temps
+WT_chant_bleue_Plage_temps
+glm_intensite <- glm(somme_charbo_post ~ Son,
+family = poisson,
+data = data_mesanges_verlan_filtre)
+summary(glm_intensite)
+DescTools::PseudoR2(glm_intensite, which = "all")
+surdispersion <- deviance(glm_intensite) / df.residual(glm_intensite)
+surdispersion
+dispersiontest(glm_intensite)
+#convertir les NA en valeur max de latence >360. On fixe de manière aribitraire ce temps à 361.
+data_m <- data_mesanges_modifiee
+for (i in 1:nrow(data_mesanges_modifiee)){
+if (is.na(data_mesanges_modifiee$Latence_approche_charbo[i])){
+data_m$Latence_approche_charbo[i] <- 361}}
+#Effet 2
+c0 <- glm(somme_charbo_post ~Vu_charbo, family="quasipoisson", data=data_m)
+print("Residual Deviance: 1322")
+#Effet 1
+c1 <- glm(somme_charbo_post ~as.numeric(Latence_approche_charbo), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1313")
+#Effet 6
+c2 <- glm(somme_charbo_post ~as.numeric(Pluie), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1571")
+#Effet 3
+c3 <- glm(somme_charbo_post ~Son, family="quasipoisson", data=data_m)
+print("Residual Deviance: 1363 ")
+#Effet 5
+c4 <- glm(somme_charbo_post ~as.numeric(Nombre_passage), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1565")
+#Effet 8
+c5 <- glm(somme_charbo_post ~as.numeric(Ensoleillement), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1585 ")
+#Effet 9
+c6 <- glm(somme_charbo_post ~as.numeric(Temperature), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1587 ")
+#Effet 4
+c7 <- glm(somme_charbo_post ~as.numeric(Vent), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1555 ")
+#Effet 7
+c8 <- glm(somme_charbo_post ~as.numeric(Jour), family="quasipoisson", data=data_m)
+print("Residual Deviance: 1572 ")
+c9 <- glm(somme_charbo_post ~Vu_charbo+as.numeric(Latence_approche_charbo), family="quasipoisson", data=data_m)
+anova(c1,c9,test="F")
+c9_1 <- glm(somme_charbo_post ~Vu_charbo+as.numeric(Latence_approche_charbo)+Son, family="quasipoisson", data=data_m,
+control = glm.control(maxit = 100, epsilon = 1e-8))
+anova(c9,c9_1,test="F")
+c9_2 <- glm(somme_charbo_post ~Vu_charbo+as.numeric(Latence_approche_charbo)+as.numeric(Vent), family="quasipoisson", data=data_m,
+control = glm.control(maxit = 100, epsilon = 1e-8))
+anova(c9,c9_2,test="F")
+c9_3 <- glm(somme_charbo_post ~Vu_charbo + as.numeric(Latence_approche_charbo)+as.numeric(Nombre_passage), family="quasipoisson", data=data_m,
+control = glm.control(maxit = 100, epsilon = 1e-8))
+anova(c9,c9_3,test="F")
+c9_4 <- glm(somme_charbo_post ~Vu_charbo + as.numeric(Latence_approche_charbo)+ as.numeric(Pluie), family="quasipoisson", data=data_m,
+control = glm.control(maxit = 100, epsilon = 1e-8))
+anova(c9,c9_4,test="F")
+c9_5 <- glm(somme_charbo_post ~Vu_charbo + as.numeric(Latence_approche_charbo)+as.numeric(Jour), family="quasipoisson", data=data_m,
+control = glm.control(maxit = 100, epsilon = 1e-8))
+anova(c9,c9_5,test="F")
+c9_6 <- glm(somme_charbo_post ~Vu_charbo + as.numeric(Latence_approche_charbo)+as.numeric(Ensoleillement) , family="quasipoisson", data=data_m,
+control = glm.control(maxit = 100, epsilon = 1e-8))
+anova(c9,c9_6,test="F")
+c9_7<- glm(somme_charbo_post ~Vu_charbo + as.numeric(Latence_approche_charbo)+ as.numeric(Temperature), family="quasipoisson", data=data_m,
+control = glm.control(maxit = 100, epsilon = 1e-8))
+anova(c9,c9_7,test="F")
+data_m$Latence_approche_charbo_corrigée <- as.numeric(data_m$Latence_approche_charbo) - 61
+modele_charbo <- glm(somme_charbo_post ~Vu_charbo+as.numeric(Latence_approche_charbo_corrigée), family="quasipoisson", data=data_m,
+control = glm.control(maxit = 100, epsilon = 1e-8))
+modele_charbo
+# Création d'un dataframe pour les prédictions, on créer des données d'entrée qui appartiennent au même intervalle que les données brutes.
+new_data <- expand.grid(
+Latence_approche_charbo_corrigée = seq(0, 400,
+length.out = 100),
+Vu_charbo = c(0, 1)
+)
+# Prédictions avec le modèle
+new_data$prediction <- predict(modele_charbo, newdata = new_data, type = "response")
+# Prédictions avec intervalles de confiance
+predictions <- predict(modele_charbo, newdata = new_data, type = "link", se.fit = TRUE)
+# Transformation du lien vers la réponse (fonction réciproque du lien log)
+new_data$fit <- exp(predictions$fit)
+new_data$lower <- exp(predictions$fit - 1.96 * predictions$se.fit)
+new_data$upper <- exp(predictions$fit + 1.96 * predictions$se.fit)
+# Tracé du graphique
+ggplot(data_m, aes(x = as.numeric(Latence_approche_charbo_corrigée),
+y = Post_2 + Post_3))+
+geom_point()+
+geom_line(data = new_data, aes(x = as.numeric(Latence_approche_charbo_corrigée),
+y = prediction,
+color = factor(Vu_charbo)), size = 1) +
+geom_ribbon(data = new_data,
+aes(x = as.numeric(Latence_approche_charbo_corrigée), ymin = lower, ymax = upper, fill = factor(Vu_charbo)),
+alpha = 0.2, inherit.aes = FALSE, show.legend = FALSE) +
+labs(
+title = "Modèle prédictif de la réponse des mésanges charbonnières selon leur temps d'approche et leur présence",
+x = "Latence d'approche (s)",
+y = "Nombre de strophes post diffusion",
+color = "Présence de la mésange charbonnière"
+)
+modele_charboX <- glm(Post_2+Post_3 ~Vu_charbo*as.numeric(Latence_approche_charbo_corrigée), family="quasipoisson", data=data_m,
+control = glm.control(maxit = 100, epsilon = 1e-8))
+modele_charboX
+# Création d'un dataframe pour les prédictions
+new_data <- expand.grid(
+Latence_approche_charbo_corrigée = seq(0, 400,
+length.out = 100),
+Vu_charbo = c(0, 1)
+)
+# Prédictions avec le modèle
+new_data$prediction <- predict(modele_charboX, newdata = new_data, type = "response")
+# Prédictions avec intervalles de confiance
+predictions <- predict(modele_charboX, newdata = new_data, type = "link", se.fit = TRUE)
+# Transformation du lien vers la réponse (inverse du lien log)
+new_data$fit <- exp(predictions$fit)
+new_data$lower <- exp(predictions$fit - 1.96 * predictions$se.fit)
+new_data$upper <- exp(predictions$fit + 1.96 * predictions$se.fit)
+# Tracé du graphique
+ggplot(data_m, aes(x = as.numeric(Latence_approche_charbo_corrigée),
+y = Post_2 + Post_3))+
+geom_point()+
+geom_line(data = new_data, aes(x = as.numeric(Latence_approche_charbo_corrigée),
+y = prediction,
+color = factor(Vu_charbo)), size = 1) +
+geom_ribbon(data = new_data,
+aes(x = as.numeric(Latence_approche_charbo_corrigée), ymin = lower, ymax = upper, fill = factor(Vu_charbo)),
+alpha = 0.2, inherit.aes = FALSE,show.legend = FALSE) +
+labs(
+title = "Modèle prédictif de la réponse des mésanges charbonnières selon l'intéraction entre leur temps d'approche et leur présence" ,
+x = "Latence d'approche (s)",
+y = "Nombre de strophes post diffusion",
+color = "Présence de la mésange charbonnière"
+)

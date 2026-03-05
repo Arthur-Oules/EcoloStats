@@ -1,0 +1,445 @@
+---
+title: "Axe2-RichesseSpecifique"
+format: html
+editor: visual
+---
+
+Cet axe vise à étudier la biodiversité du sous-bois, et à la mettre en relation avec les paramètres biotiques (recouvrement arboré, recouvrement arbustif...) ou abiotiques (pente, versant...) du site d'étude.
+
+```{r}
+library(readODS)
+library(here)
+library(tidyverse)
+library(corrplot)
+library(performance)
+library(ggstats)
+library(dplyr) #permet de selectionner, trier, supprimer des colonnes dans les dataframes
+library(ggplot2)
+```
+
+Dans un premier temps, nous avons mesuré la biodiversité en calculant la richesse spécifique (nombre d'espèces différentes) dans chaque quadrat.
+
+# I -- Calcul de la richesse spécifique par quadrat
+
+## I.1 -- Construction du tableau d'analyse
+
+Nous voulons obtenir le tableau suivant : - en lignes, les différents quadrats - en colonnes, la richesse en herbacées de chaque quadrat, ainsi que les paramètres (a)biotiques de chaque quadrat
+
+Commençons par créer le vecteur "richesse", qui donne la richesse spécifique de chaque quadrat.
+
+```{r}
+Rtot <- c() #vecteur contenant les valeurs de toutes les richesses
+for (k in 1:14){
+  recouvrement_herbacees <- read_ods(here("data", "RecouvrementHerbacees.ods"),
+    sheet = k) #On récupère la k-ième feuille, qui correspond à une placette
+  
+  for (i in 1:5){ #Balayage les quadrats successifs
+    Rtot <- c(Rtot,length(na.omit(recouvrement_herbacees[[i + 4]]))) #comptage des lignes non-vides (c'est à dire des espèces différentes) ; i+4 car Q1 est la 5ème colonne
+  }
+}
+
+richesse <- Rtot[-5] #on enlève la ligne ou Q5 vaut 0 (absence de données)
+richesse
+```
+
+On souhaite ensuite créer un grand tableau contenant la colonne richesse et les autres paramètres de la placette. Cette opération nécessite plusieurs étape de création des colonnes puis de regroupement des colonnes entre elles dans un tableau final.
+
+```{r}
+list_sheet <- list() #création de 14 tableaux (tableau) contenant chacun les info d'une placette puis stockage dans une liste générale (list_sheet)
+for (k in 1:14) {
+  tableau <- read_ods(here("data","RecouvrementQuadrats.ods"),
+    sheet = k )
+  list_sheet[[k]] <- tableau
+}
+
+tableau_1 <- do.call(rbind, list_sheet) #ATTENTION : c'est une liste de liste et non un data frame
+head(tableau_1)
+```
+
+R traite le "+" comme un opérateur et non une donnée du tableau. On remplace les "+" par des 0.5
+
+```{r}
+#On crée une fonction qui prend en argument un vecteur, le parcourt et remplace "+" par 0.5
+replace <- function(a) {
+  for (k in 1:length(a)) {
+    if (a[k] == "+") {
+      a[k] <- 0.5
+    }
+  }
+  return(a)
+}
+```
+
+```{r}
+#On applique la fonction aux colonnes de "tableau_1" puis on le convertit en data.frame
+tableau_2 <- as.data.frame(lapply(tableau_1, replace)) 
+
+#On ajoute une colonne qui est la somme des couvertures arborées + arbustives
+
+Rarbore_arbustif <- as.numeric(tableau_2$Rarbustif) + as.numeric(tableau_2$Rarbore)
+tableau_2 <- cbind(tableau_2,Rarbore_arbustif)
+tableau_2$Rarbore <- as.numeric(tableau_2$Rarbore)
+tableau_2$Rarbustif <- as.numeric(tableau_2$Rarbustif)
+
+#création d'un sous-tableau contenant seulement les paramètres biotiques
+parambiot <- tableau_2[ , c("Rarbore", "Rarbustif", "Rarbore_arbustif")]
+head(parambiot)
+```
+
+Le tableau "DonneesPlacettes" ne contient que des infos par placette alors que celui avec lequel on veut travailler possède des informations sur chaque quadrats (donc 5 fois plus). Nous avons choisi de d'approximer les valeurs des paramètres de chaque quadrat à la valeur du paramètre pour la placette correspondante.
+
+```{r}
+# on multiplie donc par 5 toutes les valeurs sauf la première par 4 (car on n'a pas la donnée du Q5 de la placette 5A)
+
+DonneesPlacettes <- read_ods(here("data","DonneesPlacettes.ods"))
+sort_DonneesPlacettes <- DonneesPlacettes[order(DonneesPlacettes$Site),]
+
+# Répéter la première ligne 4 fois
+ligne1 <- sort_DonneesPlacettes[1, ]
+ligne1_rep <- ligne1[rep(1, 4), ]
+
+# Répéter les lignes restantes 5 fois chacune
+lignes_restantes <- sort_DonneesPlacettes[-1, ]
+lignes_restantes_rep <- lignes_restantes[rep(1:nrow(lignes_restantes), each = 5), ]
+
+# Combiner le tout
+sort_DonneesPlacettes2 <- rbind(ligne1_rep, lignes_restantes_rep)
+paramabiot <- sort_DonneesPlacettes2[, c("Pente","Exp_N", "Alt")]
+head(paramabiot)
+```
+
+On fusionne "parambiot", qui contient les informations biotiques des quadrats, avec "paramabiot", qui contient les informations abiotiques de la placette.
+
+```{r}
+param_tot <- cbind(paramabiot,parambiot)
+Richesse_Specifique <- cbind(richesse,param_tot)
+
+Richesse_Specifique <- as.data.frame(Richesse_Specifique)
+head(Richesse_Specifique)
+```
+
+## 1.2 -- Etude des relations entre richesse spécifique et paramètres du milieu
+
+A partir de notre tableau, nous avons tracé plusieurs graphiques dans le but de mettre en évidence des corrélations entre les paramètres biotiques/abiotiques des quadrats et leur richesse spécifique.
+
+```{r}
+# Simplification de la nomenclature des variables
+Richesse <- Richesse_Specifique$richesse
+Pente <- Richesse_Specifique$Pente
+Altitude <- Richesse_Specifique$Alt
+Expo <- Richesse_Specifique$Exp_N
+Rarbore <- Richesse_Specifique$Rarbore
+Rarbustif <- Richesse_Specifique$Rarbustif
+Rarbore_arbustif <- Richesse_Specifique$Rarbore_arbustif
+```
+
+#### Richesse spécifique en fonction de la pente du quadrat
+
+Notre première idée est de tester un modèle linéaire. Vérifions les hypothèses :
+
+```{r}
+model <- lm(Richesse ~ Altitude)
+par(mfrow=c(2,2))
+plot(model)
+```
+
+Les quantiles de la loi normale, en particulier les quantiles "extrêmes", ne correspondent pas aux quantiles des résidus : les résidus ne suivent pas une loi normale. La condition d'homoscédasticité peut être rejetée, puisque la variabilité des résidus semble dépendre de la valeur de richesse prédite (premier graphique). Nous ne pouvons pas appliquer de modèle linéaire. Ceci est peu étonnant étant donné qu'il s'agit de données de comptages.
+
+Essayons d'appliquer un modèle linéaire généralisé poissonien à travers un exemple.
+
+#### Richesse spécifique en fonction du recouvrement arbustif
+
+```{r}
+#Affichage du nuage de points
+plot(Rarbustif,Richesse)
+
+#Construction du modèle
+model <- glm(Richesse~Rarbustif, family=poisson)
+summary_model <- summary(model)
+summary(model)
+
+#Affichage des prédictions du modèle. Pour obtenir une courbe 'lisse', il faut penser à ordonner les valeurs de recouvrement arbustif
+ord <- order(Rarbustif)
+lines(Rarbustif[ord], predict(model, type = "response")[ord], col = "red", lwd = 2)
+
+#Extrayons la p-value et les coefficients du modèle ajusté (voir summary(model) pour connaître l'emplacement de ces valeurs)
+p_value <- summary_model$coefficients[2,4]
+a0 <- summary_model$coefficients[1,1]
+a1 <- summary_model$coefficients[2,1]
+
+#Ajout du texte sur le graphique
+legend_text <- paste0("p = ", signif(p_value, 3), 
+                      "\na0 = ", round(a0, 3),
+                      "\na1 = ", round(a1, 3))
+text(x = 70, y = 16, labels = legend_text, pos = 4, col="red")
+```
+
+La p-value étant inférieure à 0.05, pour un risque alpha de 5%, la richesse spécifique est positivement et significativement corrélée au recouvrement arbustif.
+
+Le modèle s'écrit : Richesse prédite = exp(1.845 + 0.005 \* Rarbustif)
+
+## I.3 -- Etude générale des corrélations entre paramètres du milieu et richesse spécifique
+
+Plutôt que de tracer tous les graphiques possibles, il est plus efficace de réaliser une matrice de corrélation.
+
+```{r}
+colonnes_selectionnees = c("Pente", "Alt", "Exp_N", "Rarbustif", "Rarbore", "Rarbore_arbustif", "richesse")
+
+#Matrice de corrélation
+matcor <- cor(Richesse_Specifique[, colonnes_selectionnees], method = "spearman")
+colnames(matcor) = colonnes_selectionnees
+rownames(matcor) = colonnes_selectionnees
+
+#Créons une matrice de p-values pour afficher uniquement les corrélations significatives
+p_values = function(dataframe, colonnes_selectionnees){
+  df = dataframe[ , colonnes_selectionnees]
+  
+  #Création d'une matrice vide
+  matrice_corr = matrix(0, ncol(df), ncol(df))
+  colnames(matrice_corr) = colnames(df)
+  rownames(matrice_corr) = colnames(df)
+  
+  #Pour chaque couple de paramètres, on calcule la corrélation et on récupère la p-value associée. Cette p-value est affectée à sa bonne place dans la matrice de p-values.
+  for (j in 1:ncol(df)){
+    for (i in 1:ncol(df)){
+      test = cor.test(df[[i]], df[[j]], method = "spearman")
+      pvalue = test$p.value
+      matrice_corr[i,j] = pvalue
+    }
+  }
+  return(matrice_corr)
+}
+
+#Création de la matrice des p-values
+mat.pvalue = p_values(Richesse_Specifique, colonnes_selectionnees)
+
+
+#Affichage de la matrice de corrélations. Grâce à l'argument "p.mat = mat.pvalue", on n'affiche que les valeurs de corrélation significatives
+corrplot(matcor, type = "upper", method = "number", p.mat = mat.pvalue, insig = "blank", tl.col = "black")
+```
+
+Si l'on s'intéresse uniquement aux corrélations avec la richesse spécifique, seul le recouvrement arbustif corrèle significativement avec la richesse spécifique.
+
+## I.4 -- Etude plus approfondie de la relation entre richesse spécifique et recouvrement arbustif
+
+Ce résultat n'étant pas intuitif, nous essayons de faire apparaitre une sous-tendance au sein de la tendance générale. Il semble en effet que la richesse spécifique soit plus importante pour un recouvrement arbustrif compris entre 30 et 60% (voir graphique tracant richesse en fonction Rarbustif). Nous allons donc discrétiser le recouvrement arbustif en trois catégories : \[0,30) , \[30,60), \[60,100\].
+
+```{r}
+Rarbustif_class <- as.factor(cut(Rarbustif,br=c(-1,30,60,100)))
+
+#Construisons un modèle linéaire généralisé. Cette fois-ci, la variable explicative (Rarbustif_class) est qualitative ordinale.
+model <- glm(Richesse~Rarbustif_class, family=poisson)
+summary(model)
+#Le pseudo-R2 est correct (1 - 131.76/179.24 = 0.2648962)
+
+#Représentation graphique
+df=data.frame(Rarbustif_class=Rarbustif_class,Richesse=Richesse)
+ggplot(df, aes(x = Rarbustif_class, y = Richesse, color = Rarbustif_class)) +
+  geom_jitter(height = 0,width=0.1) +
+  geom_point(aes(y = fitted(model)),pch=1) +
+  scale_color_brewer(palette = "Dark2")
+
+#Calcul de la moyenne par classe
+tapply(Richesse,Rarbustif_class,mean)
+```
+
+Au vu des résultats, nous pouvons dire que la richesse spécifique est significativement plus élevée quand le recouvrement arbustif est compris entre 30 et 60%. Elle y est environ deux fois plus élevée.
+
+# II - Mesure de la biodiversité beta par l'indice de similitude de Sorensen
+
+Une autre approche pour quantifier la biodiversité au sein de nos quadrats est de s'intéresser à la biodiversité beta. La biodiversité beta reflète la différence de composition d'espèces entre 2 milieux donnés. La biodiversité beta entre peut-être calculée ainsi : 1 - S où S est l'indice de similitude de Sorensen.
+
+Cet indice a pour formule : Sorensen(A,B) = 2 \* \[Nombre d'espèces communes à A et à B\] / (\[Nombre d'espèces de A\] + \[Nombre d'espèces de B\]) où A et B sont deux quadrats différents.
+
+Cet indice varie entre 0 et 1 :
+
+-   0 : pas d'espèces communes entre les deux communautés (biodiversité beta importante)
+
+-   1 : toutes les espèces existent dans les deux communautés (biodiversité beta faible)
+
+Pour la suite, créons un tableau "groupement_data" qui contient les paramètres de la placette ainsi que les richesses en arbustifs (que nous n'analyserons pas cependant).
+
+```{r}
+nb_arbuste <- c()
+for (k in 1:14) {
+  arbust <- read_ods(here("data","PresenceEspecesArbustives.ods"),
+    sheet = k )
+    s <- length(na.omit(arbust[[5]]))
+    #[[]] permet d'avoir accès aux valeurs de la colonne tandis que [] donne la colonne sous forme de liste
+    nb_arbuste <- c(nb_arbuste,s)
+}
+
+groupement_data <- data.frame(Placette= c("5A","5B", "13A", "13B", "14A", "14B", "15A", "15B", "16A", "16B","17A", "17B", "19A", "19B"), div_arbuste = nb_arbuste)
+
+data_placette <-DonneesPlacettes[ , -c(6,7,9,10,11)] #On retire les colonnes "Placette", "Site", "Date", "Heure","Annee"
+
+groupement_data <- cbind(groupement_data, data_placette )
+head(groupement_data)
+```
+
+## I.1 - Construction d'un tableau pour l'analyse de données
+
+Nous voulons un tableau de la forme suivante : - chaque ligne correspond à un couple de quadrats d'une même placette - à chaque couple de quadrats est associé (1) l'indice de similitude de Sorensen, (2) la placette à laquelle appartient ce quadrat, (3) le versant (Nord/Sud/Fond de vallée) auquel appartient ce quadrat
+
+Commençons par récupérer les informations (versant, site, etc.) des placettes.
+
+```{r}
+data_placette <- read_ods(here("data", "DonneesPlacettes.ods"))
+data_placette <- data_placette[order(data_placette$Site),]
+head(data_placette)
+```
+
+On cherche ensuite le nombre d'espèces en commun sur deux quadrats. Créons une matrice, notée "matrice_commun", qui donne le nombre d'espèces en commun entre 2 quadrats.
+
+```{r}
+#espece_com contiendra toutes les matrices d'espèces en commun de toutes les placettes
+especes_com<- c()
+
+for (k in 1:14){
+  recouvrement_herbacees <- read_ods(here("data", "RecouvrementHerbacees.ods"),
+                                     sheet = k )
+
+  #On initialise en créant une matrice vide à 4 lignes et 5 colonnes
+  matrice_commun = data.frame( row.names = c("Q1", "Q2", "Q3", "Q4", "Q5"),"Q1"<-c(0,0,0,0,0),"Q1"<-c(0,0,0,0,0),"Q2"<-c(0,0,0,0,0),"Q3"<-c(0,0,0,0,0),"Q4"<-c(0,0,0,0,0),"Q5"<-c(0,0,0,0,0))
+  colnames(matrice_commun) <- c("Q1", "Q2", "Q3", "Q4", "Q5")
+  
+  for (i in 1:4){ #balaie les colonnes Q1 à Q4
+    for (x in 1:(5-i)) { #balaie les autres colonnes restantes
+      s=0 #nombre d'espèces en commun
+      for (z in 1:dim(recouvrement_herbacees)[1]) { #z est un indice qui va de 1 au nombre d'espèces
+        
+        #Une espèce coexiste dans 2 quadrats si :
+        # - elle n'a pas la valeur NA dans le premier quadrat, soit is.na(recouvrement_herbacees[[z,i+4]])== FALSE
+        # - elle n'a pas la valeur NA dans le deuxième quadrat, soit is.na(recouvrement_herbacees[[z,i+x+4]]) ==FALSE
+        if (is.na(recouvrement_herbacees[[z,i+4]])== FALSE & is.na(recouvrement_herbacees[[z,i+x+4]]) ==FALSE) {
+          s<- s+1
+        }
+      }
+      matrice_commun[[i,i+x]] <- s
+    
+    }}
+  
+  #On ajoute cette matrice, propre à la placette k, dans la matrice globale nommée especes_com
+  especes_com<-rbind(especes_com,matrice_commun)
+}
+
+especes_com
+```
+
+A partir de ce tableau, et en connaissant la richesse spécifique de chaque quadrat (contenue dans le vecteur "richesse"), nous allons pouvoir calculer les indices de Sorensen pour chaque couple de quadrat. Ces valeurs seront contenues dans le data.frame "Indice_Sorensen".
+
+Faisons-le d'abord pour la placette 5A, qui n'a que 4 quadrats, puis nous généraliserons la procédure aux 13 autres placettes.
+
+```{r}
+liste_placettes = c("5A", "5B", "13A", "13B", "14A", "14B", "15A", "15B", "16A", "16B", "17A", "17B", "19A", "19B")
+Indice_Sorensen <- c()
+
+N<-rep("5A",10)
+
+#pla_sorensen est un tableau qui contient un couple de quadrats par ligne ("Q1/Q2", "Q1/Q3", etc.), et à chaque couple se verra associée une valeur de similitude de Sorensen.
+pla_sorensen <- data.frame(Placette= N, Quadrat_p = c("Q1","Q1","Q1","Q1","Q2","Q2","Q2","Q3","Q3","Q4"), Quadrat_s= c("Q2","Q3","Q4","Q5","Q3","Q4","Q5","Q4","Q5","Q5"))
+
+Sorensen <- c()
+for (i in 1:4){ #balaie les colonnes Q1 à Q4
+  for (x in (1+i):5){ #balaie les colonnes restantes
+    
+    #Pour chaque couple de quadrats, on rappelle que la valeur de similitude de Sorensen est : Sorensen(A,B) = 2 * [Nombre d'espèces communes à A et à B] / ([Nombre d'espèces de A] + [Nombre d'espèces de B])
+    
+    S <-(2*especes_com[[i,x]]) / (richesse[i] + richesse[x])
+    Sorensen <- c(Sorensen,S) 
+     }
+}
+pla_sorensen <- cbind(pla_sorensen, Sorensen)
+Indice_Sorensen<-rbind(Indice_Sorensen,pla_sorensen)
+
+#Supprimons les couples de quadrats ayant le quadrat Q5, qui n'a pas été échantillonné
+toremove=Indice_Sorensen$Placette=="5A"&Indice_Sorensen$Quadrat_s=="Q5"
+Indice_Sorensen<-Indice_Sorensen[toremove==FALSE,]
+
+head(Indice_Sorensen)
+```
+
+Généralisons cette procédure aux autres placettes
+
+```{r}
+#Liste des indices de Sorensen pour les autres placettes
+for (f in 0:12){
+  n<-liste_placettes[f+2]
+  N<-rep(n,10)
+  pla_sorensen <- data.frame(Placette= N, Quadrat_p = c("Q1","Q1","Q1","Q1","Q2","Q2","Q2","Q3","Q3","Q4"), Quadrat_s= c("Q2","Q3","Q4","Q5","Q3","Q4","Q5","Q4","Q5","Q5")) 
+  Sorensen <- c()
+  for (i in 1:4){ #balaie les colonnes Q1 à Q4
+    for (x in (1+i):5){ #balaie les colonnes restantes
+      nb_communes <- especes_com[[(f+1)*5 + i,x]]
+      richesse_i <- richesse[4+i+f*5]
+      richesse_x <- richesse[4+x+f*5]
+      #Pourquoi 4+i+f*5 ? f*5 permet de se balader de 5 en 5 lorsqu'on change de placette ; i permet de se balader de 1 en 1 pas au sein de la même placette ; on ajoute 4 car dans le vecteur "richesse", la valeur Q5 de la placette "5A" a été supprimée.
+      S <-2*nb_communes/(richesse_i + richesse_x)
+      Sorensen = c(Sorensen, S)
+    }
+  }
+  pla_sorensen <- cbind(pla_sorensen, Sorensen)
+  Indice_Sorensen<-rbind(Indice_Sorensen,pla_sorensen)
+}
+
+tail(Indice_Sorensen)
+```
+
+Enfin, ajoutons à ce tableau les paramètres des placettes.
+
+```{r}
+Indice_Sorensen_group <- Indice_Sorensen%>%left_join(groupement_data,by=c("Placette"="Placette"))
+head(Indice_Sorensen_group)
+```
+
+## I.2 -- Analyse de l'hétérogénéité intra-placette
+
+Y a-t-il une hétérogénéité intra-placette ? Cette hétérogénéité varie-t-elle en fonction des conditions du milieu, et notamment, du versant ?
+
+Représentons graphiquement les valeurs de Sorensen de tous les couples de quadrats en fonction (1) de la placette et (2) du versant.
+
+```{r}
+ggplot(data=Indice_Sorensen_group, aes(x=Placette, y=Sorensen, fill=Versant)) +
+  geom_boxplot() +
+  geom_jitter(color="black", size=0.3, alpha=0.9) +
+  stat_summary(fun=mean, geom="point", shape=20, size=4, color="brown4", fill="blue") + #moyenne des indices/placette
+  xlab("Numéro de placette")+
+  ggtitle("Indice de Sorensen des placettes") +
+  ylab("Indice de Sorensen")+
+  theme_bw()
+```
+
+On remarque, d'une part, que l'indice de Sorensen ne vaut pas 1 en règle générale. Autrement dit, les espèces présentes dans un quadrat ne sont pas toujours communes avec un autre quadrat dans une même placette. Il y a une hétérogénéité intra-placette.
+
+Cette hétérogénéité dépend-t-elle du versant ? Il semblerait que le versant Nord soit moins hétérogène (hautes valeurs d'indice de Sorensen). L'hypothèse nulle à tester est H0 : l'indice de Sorensen est le même pour tous les versants. Une ANOVA pourrait permettre de répondre à cette question. Cependant les couples de quadrats ne sont pas des données indépendantes, donc on contrevient à l'hypothèse d'indépendance des résidus. On peut tenter de faire un test de Kruskal Wallis.
+
+```{r}
+pk<-kruskal.test(Indice_Sorensen_group$Sorensen, Indice_Sorensen_group$Versant)
+
+pk
+```
+
+Il y a donc bien une influence du versant sur l'hétérogénéité intra-placette.
+
+Un test multiple de comparaison de moyennes permet de comparer les versants 2 à 2. Nous utilisons un test non-paramétrique de Wilcoxon.
+
+```{r}
+pairwise.wilcox.test(Indice_Sorensen_group$Sorensen, g = Indice_Sorensen_group$Versant, p.adjust.method = "bonf")
+```
+
+Le versant Nord est statistiquement moins hétérogène que le versant Sud et le Fond de vallée.
+
+On peut également tester l'influence de la couverture herbacée (traitée comme une classe) sur l'indice de Sorensen.
+
+```{r}
+pk<-kruskal.test(Indice_Sorensen_group$Sorensen, Indice_Sorensen_group$Rherbace)
+
+ggplot(data=Indice_Sorensen_group, aes(x=Placette, y=Sorensen, fill=Rherbace)) +
+  geom_boxplot() +
+  geom_jitter(color="black", size=0.3, alpha=0.9) +
+  stat_summary(fun=mean, geom="point", shape=20, size=4, color="brown4", fill="blue") + #moyenne des indices/placette
+  xlab("Numéro de placette")+
+  ggtitle("Indice de Sorensen des placettes, Kruskal-Wallis, p = ",signif(pk$p.value,digit=3))+
+  ylab("Indice de Sorensen")+
+  theme_bw()
+```

@@ -1,0 +1,732 @@
+---
+title: "Axe 1 - communautes"
+format: pdf
+editor: visual
+---
+
+Cette partie s'intéresse aux espèces herbacées échantillonnées dans les quadrats. Son objectif est double :
+
+-   chercher s'il existe des communautés caractéristiques d'herbacées, autrement dit, s'il existe des assemblages d'espèces herbacées qui sont favorisés ;
+
+-   chercher si ces communautés sont caractéristiques d'un type de milieu, et en particulier, s'ils sont associés aux versants Nord et Sud et à la position sur la pente.
+
+```{r}
+library(here)
+library(FactoMineR) #Pour faire une analyse en composantes principales
+library(dplyr)
+library(readODS)
+library(tidyverse)
+library(factoextra) #Pour visualiser les résultats PCA
+library(phangorn) #Pour créer une matrice de distances
+library(pheatmap) #Pour représenter une matrice de distances
+library(pvclust) #Pour calculer les valeurs de bootstrap
+
+```
+
+# I - Première proposition : positionner les espèces dans l'espace multidimentionnel des paramètres du milieu
+
+## I.1 -- Création du tableau pour l'analyse
+
+Ce tableau sera de la forme suivante : à chaque ligne correspondra une espèce. A chaque colonne correspondra la caractéristique moyenne du milieu où cette espèce a été trouvée. Pour constituer ce tableau, on peut d'abord créer un tableau de toutes les observations : à chaque ligne correspond l'observation d'une espèce dans un triplet quadrat/placette/site donné.
+
+Les données de comptage des herbacées sont présentes sur plusieurs feuilles (*sheets*) du fichier "RecouvrementHerbacees.ods". Nous allons :
+
+\(1\) extraire ces données et les affecter à une liste ;
+
+\(2\) en profiter pour transformer le tableau double-entrée en tableau simple-entrée, mieux exploitable pour la suite de l'analyse. Pour ce faire, nous utiliserons la fonction "pivot_longer" ;
+
+\(3\) en profiter pour transformer les classes de Braun-Blanquet en pourcentages de recouvrement ;
+
+\(4\) puis fusionner les tableaux de la liste en un seul tableau, nommé "tab_herbacees".
+
+```{r}
+#Liste dont chaque élément est une feuille (modifiée) du tableau "RecouvrementHerbacées.ods".
+
+liste_herbacees <- lapply(1:14, function(i){
+  #On extrait la feuille de données n° i
+  tab <- read_ods(here("data", "RecouvrementHerbacees.ods"), sheet = i)
+  
+  #Les colonnes indiquant les recouvrements pour chaque quadrat peuvent être de différents types : "numeric" si elles ne contiennent que les classes de recouvrement 1 à 5, ou "character" si elles contiennent la classe "+". Pour ne pas générer de problèmes de type lorsqu'on transformera le tableau, il faut commencer par attribuer à chaque colonne la même classe "character".
+  for (colonne in 5:9){
+    tab[[colonne]] = as.character(tab[[colonne]])
+  }
+  
+  #On transforme le tableau double entrée en tableau simple entrée en créant une colonne "Quadrat" (qui prend les valeurs Q1, Q2, Q3, Q4, Q5). Les valeurs de recouvrement rejoignent la colonne "Recouvrement".
+  tab <- pivot_longer(tab, cols = paste("Q", 1:5, sep = ""), names_to = "Quadrat", values_to = "Recouvrement")
+  
+  #On enlève les lignes sans observation
+  tab = na.omit(tab)
+  
+  #On transforme les classes de Braun Blanquet par des nombres
+  
+  tab[tab$Recouvrement == "+", "Recouvrement" ] = "0.5"
+  tab[tab$Recouvrement == "1", "Recouvrement" ] = "5"
+  tab[tab$Recouvrement == "2", "Recouvrement" ] = "15"
+  tab[tab$Recouvrement == "3", "Recouvrement" ] = "35"
+  tab[tab$Recouvrement == "4", "Recouvrement" ] = "60"
+  tab[tab$Recouvrement == "5", "Recouvrement" ] = "90"
+
+  tab$Recouvrement = as.numeric(tab$Recouvrement)
+  
+  return(tab)
+})
+```
+
+```{r}
+#Combinons ces données en un seul tableau
+
+tab_herbacees = bind_rows(liste_herbacees)
+head(tab_herbacees)
+```
+
+Ensuite, nous devons extraire les caractéristiques environnementales correspondant à chaque observation. C'est ainsi que nous pourrons représenter chaque espèce dans l'espace multidimensionnel de ces paramètres.
+
+Ces paramètres environnementaux sont présents dans deux fichiers, "RecouvrementQuadrats.ods" et "DonneesPlacettes.ods". Le premier répertorie les paramètres à l'échelle du quadrat (couvert de litière, d'arbustes, d'herbacées, proportion de sol nu, etc.). Le second répertorie les paramètres à l'échelle de la placette (versant, altitude, pente, etc.).
+
+```{r}
+#Tableau des données des quadrats
+
+liste_recouvrements_quadrats = lapply(1:14, function(i){
+  #On récupère la feuille de la placette n°i
+  tab = read_ods(here("data", "RecouvrementQuadrats.ods"), sheet = i)
+  
+  #Nous avons parfois attribué un recouvrement "+", que l'on remplace par "0.5"
+  colonnes_a_remplacer = c("Rlitiere", "RsolNu","Rroche","Rmousses","Rherbace","Rarbustif","Rarbore")
+  for (col in colonnes_a_remplacer){
+    if (class(tab[[1,col]]) == "character"){ #On ne remplace que dans les colonnes de type "character", c'est-à-dire celles qui présentent au moins une fois la valeur "+".
+      tab[tab[,col] == "+", col] = "0.5"
+      tab[[col]] = as.numeric(tab[[col]])
+    }
+  }
+  return (tab)
+})
+
+RecouvrementQuadrats = do.call(rbind, liste_recouvrements_quadrats) #Autre manière de fusionner les tableaux par lignes
+head(RecouvrementQuadrats)
+```
+
+```{r}
+#Tableau des données par placette.
+DonneesPlacettes = read_ods(here("data", "DonneesPlacettes_Feuille-originale-Versant-Topo.ods"), sheet = 1)
+head(DonneesPlacettes)
+```
+
+Pour extraire ces paramètres environnementaux et les ajouter au fichier "tab_herbacees", nous avons créé deux fonctions :
+
+-   la première lit le triplet quadrat/placette/site correspondant à chaque observation, puis recherche, dans le tableau "RecouvrementQuadrats", la caractéristique environnementale associée à ce quadrat.
+
+-   la deuxième lit le couple placette/site de chaque observation, puis recherche, dans le tableau "DonneesPlacettes", la caractéristique environnementale associée à cette placette. Nous supposons donc que les données à l'échelle de la placette s'appliquent à chaque quadrat.
+
+```{r}
+Caracteristiques_quadrat = function(caracteristique){
+  liste_valeurs <- sapply(1:nrow(tab_herbacees), function(i){
+    site = tab_herbacees$Site[i]
+    placette = tab_herbacees$Placette[i]
+    quadrat = tab_herbacees$Quadrat[i]
+    
+    #Retournons la caractéristique biotique ou abiotique recherchée
+    result <- RecouvrementQuadrats[(RecouvrementQuadrats$Site == site) & (RecouvrementQuadrats$Placette == placette) & (RecouvrementQuadrats$Quadrat == quadrat),
+                                    caracteristique]
+    return (result[[1]])
+    
+    
+  })
+  return (liste_valeurs)
+}
+```
+
+```{r}
+#test
+#Caracteristiques_quadrat("Rherbace")
+```
+
+```{r}
+Caracteristiques_placette = function(caracteristique){
+  liste_valeurs <- sapply(1:nrow(tab_herbacees), function(i){
+    site = tab_herbacees$Site[i]
+    placette = tab_herbacees$Placette[i]
+    
+    #Retournons la caractéristique biotique ou abiotique associée
+    result <- DonneesPlacettes[ (DonneesPlacettes$Site == site) & (DonneesPlacettes$Placette == placette),
+                                caracteristique]
+    return (result[[1]]) #Pour retourner la valeur et pas le tibble
+  })
+  return (liste_valeurs)
+}
+```
+
+```{r}
+#test
+#Caracteristiques_placette("Pente")
+```
+
+Appliquons ces fonction à un ensemble de paramètres environnementaux potentiellement intéressants, que nous utiliserons pour l'analyse multivariée.
+
+```{r}
+#Sélectionnons les variables explicatives pertinentes pour l'analyse multivariée. Il s'agit de variables environnementales quantitatives. Nous ne sélectionnons pas le paramètre "Rherbace", puisqu'il dépend de l'abondance de chaque espèce herbacée (qui est la variable réponse), et ne peut donc pas être considéré comme une variable explicative indépendante.
+params_quadrats <- c("Rlitiere", "RsolNu", "Rroche", "Rmousses", "Rarbustif", "Rarbore" )
+params_placettes <- c("Pente", "Exp_N", "Alt")
+```
+
+```{r}
+#Extraction des paramètres du quadrat en une liste de vecteurs
+
+parametres_a_ajouter_quadrats <- lapply(params_quadrats, function(i){
+  return (Caracteristiques_quadrat(i) )
+})
+names(parametres_a_ajouter_quadrats) <- params_quadrats
+parametres_a_ajouter_quadrats <- bind_cols(parametres_a_ajouter_quadrats)
+
+#Extraction des paramètres de la placette en une liste de vecteurs
+parametres_a_ajouter_placettes <- lapply(params_placettes, function(i){
+  return (Caracteristiques_placette(i) )
+})
+names(parametres_a_ajouter_placettes) <- params_placettes
+parametres_a_ajouter_placettes <- bind_cols(parametres_a_ajouter_placettes)
+
+```
+
+Ajoutons ces paramètres au tableau des herbacées.
+
+```{r}
+tab_herbacees <- data.frame(tab_herbacees, parametres_a_ajouter_quadrats, parametres_a_ajouter_placettes)
+```
+
+```{r}
+str(tab_herbacees)
+```
+
+A partir de ce tableau, nous allons pouvoir calculer les caractéristiques moyennes associées à chaque espèce. L'idée est de regrouper les observations d'une même espèce, et de calculer, pour chaque paramètre, la valeur moyenne où cette espèce a été échantillonnée. Cette moyenne est pondérée par la surface occupée par cette espèce dans chaque condition.
+
+Tout d'abord, créons une fonction "préférence", qui, pour une liste d'espèces données et un paramètre environnemental donné (par exemple le recouvrement arboré), renvoie la condition moyenne où ces espèces sont rencontrées.
+
+Certaines espèces n'ont été aperçues qu'une fois : il est illusoire de vouloir calculer leur moyenne pour chaque paramètre. Nous leur attribuons la valeur "NA" et n'en tiendrons pas compte pour la suite de l'analyse.
+
+```{r}
+preference <- function(lespece, parametre){
+  liste_moyennes <- sapply(lespece, function(i){
+    #On crée un petit tableau de toutes les observations de cette espèce
+    tab <- tab_herbacees[tab_herbacees$Espèce == i, c("Recouvrement", parametre)]
+    
+    if (dim(tab)[1] == 1){
+      val_moyenne <- NA #On attribue la valeur "NA" aux espèces aperçues une fois.
+    } else {
+      val_moyenne <- weighted.mean(x = tab[,parametre], w = tab$Recouvrement)
+    }
+    return (val_moyenne)
+  })
+  return (liste_moyennes)
+}
+```
+
+Avec la fonction préférence, nous pouvons créer un data frame donnant :
+
+-   les valeurs moyennes de chaque paramètre pour chaque espèce
+-   les noms des espèces en noms de lignes (ce qui demande de convertir un tibble en dataframe)
+-   seulement les espèces avec au moins 2 observations
+
+```{r}
+params_a_analyser <- c("Rlitiere", "RsolNu", "Rroche", "Rmousses", "Rarbustif", "Rarbore", "Pente", "Exp_N", "Alt")
+liste_especes <- unique(tab_herbacees$Espèce)
+
+#Créons une liste dont chaque élément est une vecteur. Chaque vecteur contient les valeurs moyennes d'un paramètre pour l'ensemble des espèces.
+tab_preference <- lapply(params_a_analyser, preference, lespece = liste_especes)
+
+#Fusionnons ces listes en un tableau
+TabHerbaceesEspeces <- bind_cols(tab_preference)
+
+#Donnons des noms aux colonnes et aux lignes
+TabHerbaceesEspeces <- as.data.frame(TabHerbaceesEspeces)
+colnames(TabHerbaceesEspeces) = params_a_analyser
+rownames(TabHerbaceesEspeces) = liste_especes
+
+#Supprimons les espèces rencontrées une seule fois, pour lesquelles nous avons précédemment attribué la valeur NA
+TabHerbaceesEspeces <- na.omit(TabHerbaceesEspeces)
+
+head(TabHerbaceesEspeces)
+```
+
+```{r}
+#Sauvegardons ce tableau pour l'axe 3
+write.csv(TabHerbaceesEspeces, file = "TabHerbaceesEspeces.csv")
+```
+
+## I.2 -- Analyse à composante principale n°1
+
+Les paramètres environnementaux n'ont pas la même unité, et on ne donne pas *a priori* plus d'importance à certains paramètres qu'à d'autres. Il est donc pertinent de centrer et réduire les données.
+
+```{r}
+acp1 <- PCA(X = TabHerbaceesEspeces, scale.unit = TRUE, graph = F)
+```
+
+Quelle est la contribution de chacun des axes à la variance totale ?
+
+```{r}
+fviz_screeplot(acp1)
+```
+
+Les deux premières composantes expliquent presque 60% de la variabilité des conditions environnementales où les espèces sont présentes.
+
+Représentons les espèces dans un plan défini par les 2 premières composantes principales. Afin de gagner en lisibilité et de ne représenter que les données les plus pertinentes, nous ne représentons :
+
+\- que les paramètres qui contribuent suffisamment à chacune des dimensions, et ce grâce à "select.var"
+
+\- que les 15 espèces les mieux projetées sur chacun des axes, grâce à "select.ind = list(cos2 = 15)".
+
+```{r}
+p1 <- fviz_pca_biplot(acp1, labelsize = 4, repel = T, col.var = "purple", col.ind = "darkgreen", select.ind = list(cos2 = 15), select.var = list(contrib = 6))
+p1
+```
+
+```{r}
+ggsave("ACP1bip.png", width = 7, height = 5)
+```
+
+# II -- Deuxième proposition : étudier les corrélations entre espèces
+
+Cette fois-ci, les espèces (ou plus précisément les surfaces occupées par chaque espèce) sont les variables explicatives. Nous allons positionner les quadrats échantillonnés dans un espace multidimensionnel d'espèces. Cela nous permettra notamment d'étudier les corrélations entre espèces. On veut donc un tableau avec pour chaque ligne un quadrat, et pour chaque colonne une espèce.
+
+## II.1 - Création d'un tableau pour l'analyse
+
+```{r}
+liste_herbacees2 <- lapply(1:14, function(i){
+  #On extrait la feuille de données n° i
+  tab <- read_ods(here("data", "RecouvrementHerbacees.ods"), sheet = i)
+  
+  #On transforme les classes de Braun Blanquet par des pourcentages de recouvrement
+  for (q in paste("Q", 1:5, sep = "")){
+    #Les colonnes peuvent être de types différent à cause des "+". Par exemple un "1" sera interprété par R comme un 'character' s'il est dans une colonne qui contient un "+", et comme un 'numeric' dans le cas contraire. Pour éviter ce problème, on traite d'abord toutes les colonnes comme des caractères. On ne peut pas traiter "+" comme un numérique directement.
+    tab[[q]] = as.character(tab[[q]])
+    
+    #Les NA sont des zéros
+    tab[is.na(tab[,q]), q] = "0"
+    
+    #On transforme les classes de Braun Blanquet par des pourcentages de recouvrement
+    tab[tab[,q] == "+", q] = "0.5"
+    tab[tab[,q] == "1", q] = "5"
+    tab[tab[,q] == "2", q] = "15"
+    tab[tab[,q] == "3", q] = "35"
+    tab[tab[,q] == "4", q] = "60"
+    tab[tab[,q] == "5", q] = "90"
+    tab[[q]] = as.numeric(tab[[q]])
+  }
+  
+  #Maintenant, nous allons renommer les colonnes "quadrat" en "site.placette.quadrat".
+  site = tab$Site[1]
+  placette = tab$Placette[1]
+  
+  tab = tab[,-c(1,2,3)] #Nous supprimons les 3 premières colonnes qui vont nous gêner lorsque nous allons transposer le tableau
+
+  colnames(tab) = c("Espèce", paste(site, placette, "Q", 1:5, sep = ""))
+  
+  return(tab)
+})
+```
+
+Cette liste de tableaux doit être fusionnée. Or, ce ne sont pas les mêmes espèces qui sont indiquée en ligne d'un tableau à l'autre. Les colonnes ne sont donc pas de même taille, et les espèces peuvent être listées dans un ordre différent. On utilisera donc la fonction "merge" plutôt que "cbind".
+
+```{r}
+tableau_merge <- merge(liste_herbacees2[1], liste_herbacees2[2], all = T, by = "Espèce")
+
+for (i in 3:14){
+  tableau_merge <- merge(tableau_merge, liste_herbacees2[i], all = T, by = "Espèce")
+}
+tableau_merge[is.na(tableau_merge)] <- 0
+```
+
+```{r}
+head(tableau_merge)
+```
+
+On supprime les espèces jamais observées, c'est-à-dire celles dont l'effectif est zéro.
+
+```{r}
+effectif_par_espece <- sapply(1:nrow(tableau_merge), function(i){
+  ligne <- tableau_merge[i,2:ncol(tableau_merge)]
+  return(sum(ligne))
+})
+
+TabReduitEspece <- tableau_merge[effectif_par_espece > 0,] 
+```
+
+```{r}
+head(TabReduitEspece)
+```
+
+Enregistrons ce tableau pour l'axe 3.
+
+```{r}
+write.csv(TabReduitEspece, file = "TabReduitEspece.csv")
+```
+
+## II.1 -- Analyse à composantes principales n°2
+
+On aimerait représenter un espace multidimensionnel ou chaque dimension correspond à une abondance d'espèce. L'analyse en composantes principales permet de représenter au mieux cet espace en 2D.
+
+Nous proposons de conserver toutes les espèces pour l'ACP, dans l'éventualité où certaines, bien que rares, puissent expliquer la variabilité du jeu de données. Ce n'est que dans la représentation graphique que nous ignorerons les espèces contribuant peu à chacun des axes. (Nous avons d'ailleurs testé que la suppression des espèces les plus rares ne modifie que peu le % de variance expliquée par chacune des dimensions)
+
+```{r}
+noms_especes = TabReduitEspece[,1]
+tableau_acp2 <- TabReduitEspece[,-1] #On supprime la colonne "espèces", qui va nous embêter lors de l'ACP
+tableau_acp2 <- t(tableau_acp2)
+colnames(tableau_acp2) <- noms_especes
+head(tableau_acp2[,1:5]) #N'affichons pas toutes les colonnes
+```
+
+Il est logique de donner plus de poids aux espèces les plus abondantes en général dans la constitution des axes dim1 et dim2. De plus, les données de recouvrement sont dans la même unité. Nous décidons donc de ne pas réduire les données.
+
+```{r}
+acp2 <- PCA(tableau_acp2, scale.unit = F)
+```
+
+```{r}
+fviz_screeplot(acp2)
+```
+
+Le nombre de dimensions (soit le nombre d'espèces) est tel que chaque axe explique relativement peu de variabilité.
+
+Maintenant, représentons graphiquement le cercle des corrélations (c'est-à-dire les espèces) et le graphe des individus (c'est-à-dire les quadrats). Nous pouvons ensuite colorer chaque quadrat selon son versant ou sa position dans la pente. Comment colorer ces quadrats ? Nous proposons ci-dessous deux systèmes de classification :
+
+-   le premier, classique, qui considère le versant (Nord/Sud) et l'emplacement dans la pente (Haut vs Milieu vs Bas)
+
+-   le deuxième, plus synthétique, qui considère 3 catégories : versant Nord (N), versant Sud (S), et Fond de vallée (F). En effet, il peut être pertinent de considérer les fonds de vallée comme des sites à part.
+
+### Proposition n°1 : effet de l'exposition (Nord/Sud) et de l'emplacement sur le versant (Haut/Milieu/Bas de pente) sur la composition des communautés
+
+```{r}
+#Récupérons la liste des quadrats
+liste_emplacements <- rownames(tableau_acp2)
+```
+
+```{r}
+#Associons chaque quadrat à son versant
+liste_versants <-sapply(liste_emplacements, function(i){
+  if (nchar(i) == 5){
+    site = substring(i, 2,2)
+    placette = substring(i, 3,3)
+  }
+  if (nchar(i) == 6){
+    site = substring(i,2,3)
+    placette = substring(i, 4,4)
+  }
+  versant <- DonneesPlacettes[DonneesPlacettes$Site == site & DonneesPlacettes$Placette == placette, "Versant"]
+  return (as.character(versant))
+})
+```
+
+```{r}
+#Associons chaque quadrat à son emplacement sur le versant : haut vs milieu vs bas de pente
+liste_topo <-sapply(liste_emplacements, function(i){
+  if (nchar(i) == 5){
+    site = substring(i, 2,2)
+    placette = substring(i, 3,3)
+  }
+  if (nchar(i) == 6){
+    site = substring(i,2,3)
+    placette = substring(i, 4,4)
+  }
+  versant <- DonneesPlacettes[DonneesPlacettes$Site == site & DonneesPlacettes$Placette == placette, "Topo"]
+  return (as.character(versant))
+})
+```
+
+Voici la représentation graphique de l'ACP en colorant par versant. Seules les 15 espèces contribuant le plus aux dimensions 1 et 2 sont représentées.
+
+```{r}
+p3 <- fviz_pca_var(acp2, repel = T, select.var = list(cos2 = 0.2), col.var = "purple")
+p4 <- fviz_pca_ind(acp2, geom = "point",  repel = T, select.var = list(cos2 = 15), col.ind = liste_versants, addEllipses = T)
+p3
+p4
+```
+
+Et si on colore les quadrats selon leur *position* sur le versant.
+
+```{r}
+p3 <- fviz_pca_var(acp2, repel = T, select.var = list(cos2 = 0.2), col.var = "purple")
+p4 <- fviz_pca_ind(acp2, geom = "point",  repel = T, select.var = list(cos2 = 15), col.ind = liste_topo, addEllipses = T)
+p3
+p4
+```
+
+Et selon l'intersection du versant et de la position sur le versant :
+
+```{r}
+p3 <- fviz_pca_var(acp2, repel = T, select.var = list(cos2 = 0.2), col.var = "purple")
+p4 <- fviz_pca_ind(acp2, geom = "point",  repel = T, select.var = list(cos2 = 15), col.ind = interaction(liste_versants, liste_topo), addEllipses = T)
+p3
+p4
+```
+
+Le problème est qu'au vu du faible nombre d'échantillons, chaque combinaison correspond en définitive à un seul site.
+
+### Proposition n°2 : classement des quadrats en Nord/Sud/Fond de vallée
+
+Ce classement est celui que nous utiliserons pour toutes les analyses ultérieures. Il est contenu dans le tableau "DonneesPlacettes.ods". La seule différence avec "DonneesPlacettes_Feuille-originale-Versant-Topo.ods" est que les sites 15 et 16 sont considérés comme des fonds de vallée.
+
+```{r}
+#Extraction de la nouvelle feuille
+DonneesPlacettes <- read_ods(here("data", "DonneesPlacettes.ods"))
+head(DonneesPlacettes)
+```
+
+```{r}
+#Extraction du versant pour chaque quadrat contenu dans la liste "liste_emplacements"
+liste_versants <-sapply(liste_emplacements, function(i){
+  if (nchar(i) == 5){ #Pour les placettes 5A et 5B
+    site = substring(i, 2,2)
+    placette = substring(i, 3,3)
+  }
+  if (nchar(i) == 6){ #Pour toutes les autres placettes
+    site = substring(i,2,3)
+    placette = substring(i, 4,4)
+  }
+  versant <- DonneesPlacettes[DonneesPlacettes$Site == site & DonneesPlacettes$Placette == placette, "Versant"]
+  return (as.character(versant))
+})
+```
+
+```{r}
+#Représentation graphique
+p3 <- fviz_pca_var(acp2, labelsize = 5, repel = T, select.var = list(contrib = 12), col.var = "purple")
+p4 <- fviz_pca_ind(acp2, geom = "point",  repel = T, col.ind = liste_versants, addEllipses = T)
+p3
+p4
+```
+
+```{r}
+ggsave("ACP2var.png",
+       plot = p3, width = 8, height = 7)
+ggsave("ACP2ind.png",
+       plot = p4, width = 8, height = 7)
+```
+
+On distingue donc 3 grands types de communautés. L'une, caractérisée par la fétuque, le gaillet et la germandrée scorodoine, associée aux versants Sud. L'autre, avec du lierre et de l'érable champêtre, associée au fond de vallée (rappel : faible altitude). L'autre, caractérisée par du chêne sessile et du mélempire, qui contient à la fois des sites exposés au Nord et des fonds de vallée.
+
+### Bonus : représentation de la variance inter-sites et intra-sites
+
+Nous allons colorer les quadrats selon leur site.
+
+```{r}
+#Extraction de la donnée "site" pour chaque quadrat. Il suffit d'extraire le numéro qui suit la lettre "X" dans chaque quadrat. Par exemple : "X13AQ5" -> "13".
+liste_sites <- sapply(liste_emplacements, function(i){
+  if (nchar(i) == 5){
+    site = substring(i, 2,2)
+  } else {
+    site = substring(i, 2,3)
+  }
+  return (site)
+})
+```
+
+```{r}
+#Coloration des quadrats en fonction de leur site.
+p3 <- fviz_pca_var(acp2, repel = T, select.var = list(cos2 = 0.2), col.var = "purple")
+p4 <- fviz_pca_ind(acp2, geom = "point",  repel = T, select.var = list(cos2 = 15), col.ind = liste_sites, addEllipses = T)
+p3
+p4
+```
+
+Les quadrats d'un même site ont souvent des compositions spécifiques proches, mais cela varie en fonction du site. Par exemple, le site 19 est très disparate, et cela est confirmé dans l'axe 2 par le calcul de la diversité beta.
+
+# III -- Analyse en composantes discriminantes
+
+```{r}
+#Import du package MASS
+library(MASS)
+```
+
+Parvient-on à prédire le versant (Nord, Sud, Fond de vallée) à partir de la composition en espèces d'un lieu ? Le modèle appelé par la fonction lda trouve les composantes principales (LD1 et LD2, qui sont des combinaisons linéaires des abondances des diverses espèces) qui permettent de discriminer au mieux les quadrats en fonction des groupes qu'on leur donne.
+
+Ce modèle est entraîné sur une partie des quadrats (data_train), et testé sur de nouveaux quadrats (data_test), dont il va essayer de prédire le versant à partir des espèces qui y sont présentes.
+
+```{r}
+#Tableau qui, pour chaque quadrat, donne la composition en espèces, et le versant auquel appartient ce quadrat
+TabDA <- data.frame(tableau_acp2, liste_versants)
+head(TabDA)
+```
+
+```{r}
+#Séparons les données en 1 jeu d'entraînement (75% des quadrats) et 1 jeu de test (le reste)
+aleatoire2 <- sample(1:nrow(TabDA), round(nrow(TabDA) * 0.75))
+
+data_train2 <- TabDA[aleatoire2,]
+data_test2 <- TabDA[-aleatoire2,]
+head(data_train2)
+```
+
+Les lignes sans observation vont nous gêner car la fonction lda fait une erreur quand les valeurs d'une colonne sont constantes. Supprimons les colonnes dont la variance est nulle.
+
+```{r}
+# Calculons la variance de chaque colonne
+variances <- apply(data_train2[, -ncol(data_train2)], 2, var) #On supprime la dernière colonne qui donne le versant
+
+col_a_conserver = variances > 0
+
+# Filtrons les colonnes avec une variance non nulle
+data_train2_filtre <- data_train2[, -ncol(data_train2)][, col_a_conserver]
+```
+
+```{r}
+#On fait l'analyse en composantes discriminantes
+result_lda2 <- lda(data_train2_filtre, grouping = data_train2$liste_versants)
+result_lda2
+```
+
+```{r}
+plot(result_lda2)
+```
+
+Quel est le score du modèle sur le jeu d'entraînement ?
+
+```{r}
+#Prédiction du versant à partir du modèle
+versant_estime2_train <- predict(result_lda2, data_train2_filtre)
+
+#Calcul du score
+mean(versant_estime2_train$class == data_train2$liste_versants)
+```
+
+Il est parfait. Et sur le jeu de test ?
+
+```{r}
+
+#On ne peut baser notre analyse que sur les espèces déjà rencontrées dans le jeu d'entraînement
+data_test2_filtre <- data_test2[, -ncol(data_test2)][, col_a_conserver]
+
+versant_estime2 <- predict(result_lda2, data_test2_filtre)
+table(versant_estime2$class, data_test2$liste_versants)
+```
+
+```{r}
+#Calcul du taux de réussite
+mean(versant_estime2$class == data_test2$liste_versants)
+```
+
+Il est plutôt décevant, mais sa performance est meilleure que le hasard (environ 1/3 car il y a 3 parcelles). On peut prédire, dans une certaine mesure, le versant à partir de la composition d'espèces.
+
+On est dans un cas d'overfitting/surajustement : le modèle colle trop au jeu d'entraînement (score = 1) mais généralise peu (score = 0.55).
+
+# IV -- Matrice de distances entre espèces
+
+L'objectif est de déterminer s'il existe des associations préférentielles entre espèces, autrement dit d'évaluer quelles espèces sont présentes ensemble. Nous allons construire une matrice de distance à partir des observations réalisées dans chaque quadrat.
+
+On veut constituer un tableau à double entrée où une ligne correspond à une espèce, et une colonne correspond à un quadrat. Une stratégie possible est : - (1) de fusionner toutes les feuilles du tableau "RecouvrementHerbacees.ods" par ligne - (2) de transformer ce grand tableau en tableau simple entrée avec les colonnes "Quadrat" et "Recouvrement". Nous en profiterons pour supprimer les espèces jamais rencontrées. Puisqu'on ne considère que la présence, le recouvrement sera remplacé par "1" - (3) de refaire un tableau double-entrée avec les quadrats en colonne et les espèces en ligne.
+
+```{r}
+liste_herbacees <- lapply(1:14, function(i){
+  tab <- read_ods(here("data","RecouvrementHerbacees.ods"), sheet = i)
+  
+  return (tab)
+})
+
+#Fusion de toutes les feuilles par ligne
+TabHerb <- do.call(rbind, liste_herbacees)
+head(TabHerb)
+```
+
+```{r}
+#(2)
+TabHerb <- TabHerb |>
+  pivot_longer(
+    cols = c("Q1", "Q2", "Q3", "Q4", "Q5"),
+    names_to = "Quadrat",
+    values_to = "PresenceAbsence"
+  ) |>
+  filter(PresenceAbsence!="NA")|> #on supprime les lignes correspondant à des espèces jamais rencontrées
+  mutate(PresenceAbsence = rep(1, length(PresenceAbsence))) |> #on remplace toutes les valeurs de recouvrement par des 1
+  pivot_wider(names_from = c(Site, Placette, Quadrat), values_from = PresenceAbsence) #création du tableau au format recherché
+
+#On remplace les NA par des zéros
+TabHerb[is.na(TabHerb)] <- 0
+TabHerb <- data.frame(TabHerb)
+head(TabHerb)
+```
+
+```{r}
+#Pour calculer une matrice de distances, il faut ôter les colonnes qualitatives, soit les 2 premières
+rownames(TabHerb) = TabHerb$Espèce
+TabHerb = TabHerb[, -c(1,2)]
+
+head(TabHerb)
+```
+
+Créons la matrice des distances. La méthode "binary" compte, pour chaque couple d'espèces, la proportion d'observations où une seule des deux espèces est présente parmi les observations où au moins une des deux espèces est présente. Ainsi, si deux espèces sont aperçues dans le même quadrat, la distance entre les espèces diminue. La méthode "binary" permet d'éviter le biais qui place les espèces fréquemment aperçues (donc associées à beaucoup de 1) en extragroupe.
+
+```{r}
+MatriceAffinite <- dist(TabHerb, method = "binary")
+```
+
+Représentons graphiquement cette matrice.
+
+```{r}
+MatriceAffinite |>
+  as.matrix() |>
+  as.data.frame.table() |>
+  ggplot(mapping = aes(x = Var1, y = Var2, fill = Freq)) +
+  geom_raster() +
+  #scale_fill_viridis(name = "Distance") +
+  scale_x_discrete(position = "top") +
+  scale_y_discrete(limits = rev) +
+  ggtitle("Heatmap de la matrice des distances") +
+  guides(x = guide_axis(angle = 90)) +
+  theme(axis.title = element_blank()) #utilisation du code d'Arthur Oulès
+
+```
+
+La représentation clusterisée est plus lisible.
+
+```{r}
+pheatmap(as.matrix(MatriceAffinite))
+```
+
+Le graphique reste peu lisible en raison du nombre élevé d'espèces observées. De plus, si les espèces ont été aperçues sur peu de quadrats, l'interprétation de la distance manque de pertinence. Peut-on dire que 2 espèces sont co-présentes parce qu'on les a aperçues une fois dans le même quadrat ? Pour résoudre ces deux problèmes, il vaut mieux se focaliser sur les espèces suffisamment observées. Par exemple celles ayant été vues au moins 5 fois (donc forcément dans 2 placettes au moins).
+
+```{r}
+nb_observations <- apply(TabHerb, MARGIN = 1, sum)
+#D'où le tableau réduit
+TabHerbRed <- TabHerb[nb_observations > 5, ]
+head(TabHerbRed)
+```
+
+Représentons cette matrice de distances.
+
+```{r}
+MatriceAffinite <- dist(TabHerbRed, method = "binary")
+MatriceAffinite |>
+  as.matrix() |>
+  as.data.frame.table() |>
+  ggplot(mapping = aes(x = Var1, y = Var2, fill = Freq)) +
+  geom_raster() +
+  #scale_fill_viridis(name = "Distance") +
+  scale_x_discrete(position = "top") +
+  scale_y_discrete(limits = rev) +
+  ggtitle("Heatmap de la matrice des distances") +
+  guides(x = guide_axis(angle = 90)) +
+  theme(axis.title = element_blank())
+
+```
+
+```{r}
+pheatmap(as.matrix(MatriceAffinite))
+```
+
+On retrouve les 3 grands types de communautés qu'on avait observées avec l'analyse multivariée (Nord, Sud et fond de vallée).
+
+La matrice de distance est associée à un arbre. Calculons les valeurs de bootstrap correspondantes.
+
+```{r}
+bstrap <- pvclust(as.matrix(MatriceAffinite), method.hclust="complete", method.dist="binary", nboot=1000)
+plot(bstrap)
+
+```
+
+L'arbre est trop petit pour être lu. Créons un arbre de boostrap en calculant la distance de Canberra. Cette distance vaut ∑ ∣xi - yi| / (|xi| - |yi|) avec x et y deux vecteurs.Cette méthode permet également d'éviter le biais qui place les espèces fréquemment aperçues (donc associées à beaucoup de 1) en extragroupe.
+
+```{r}
+bstrap <- pvclust(as.matrix(MatriceAffinite), method.hclust="complete", method.dist="canberra", nboot=1000)
+plot(bstrap)
+
+```
+
+
+On obtient en effet des valeurs de bootstrap inférieures à 90% pour les 3 branches correspondant aux 3 groupes identifiés. Ces branches sont donc moyennement soutenues par le bootstrap, mais elles restent interprétables en complément de l'analyse multivariée.

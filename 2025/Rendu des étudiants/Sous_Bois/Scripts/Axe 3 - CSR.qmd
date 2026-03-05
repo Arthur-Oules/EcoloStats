@@ -1,0 +1,366 @@
+---
+title: "Axe_III"
+format: html
+editor: visual
+---
+
+Attention : cette partie utilise le tableau des conditions moyennes par espèce (TabHerbaceesEspeces.csv) généré dans l'axe 1 et contenu dans le dossier "Script". Merci de faire tourner le fichier "Axe 1 - communautes.qmd" avant.
+
+# AXE III -- Analyse fonctionnelle : étude des stratégies écologiques au sein des communautés d'herbacée
+
+```{r}
+library(readODS) 
+library(readxl) 
+library(here) 
+library(tidyverse)
+library(corrplot) 
+library(performance) 
+library(dplyr)
+library(FactoMineR)
+library(factoextra)
+```
+
+# AXE III -- Analyse fonctionnelle : étude des stratégies écologiques au sein des communautés d'herbacée
+
+Une communauté se définit comme un ensemble de populations, constituées d'organismes interagissant les uns avec les autres. Etant donné la diversité de ces interactions, les communautés s'intègrent au sein d'écosystèmes complexes. Au cours de l'évolution, certaines espèces subissent des modifications d'un ou plusieurs traits, entraînant une amélioration de leur fitness dans certaines conditions, mais une perte de certaines fonctions pouvant réduire leur fitness dans d'autres contextes écologiques.
+
+Ce phénomène, nommé trade-off, peut être illustré par la stratégie écologique d'une espèce. La principale classification utilisée chez les plantes est la théorie des stratégies CSR que John Philippe Grimme établit en 1974. Selon lui, toute espèce végétale résulte d'une combinaison linéaire entre trois types de stratégies :
+
+-   Stratège compétiteur (C) : les stratèges C mobilisent de façon efficace les resssources présentes dans un milieu stable.
+
+-   Stratège tolérant au stress (S) : les stratèges S vivent dans des environnements pauvres (ou extrêmes) en limitant leur croissance et leurs dépenses énergétiques.
+
+-   Stratège rudérale (R) : les stratèges R se développent dans des milieux fortement perturbés en complétant rapidement leur cycle de vie.
+
+Nous avons donc cherché à déterminer s'il existait une corrélation entre stratégie écologique (classification de Grime) et paramètres du milieux (biotiques et/ou abiotiques).
+
+Pour ce faire, nous nous sommes appuyés sur l'article de Simon Pierce et al. intitulé "A global method for calculating plant CSR ecological strategies applied across biomes world‐wide". Les chercheurs ont récolté trois données sur les feuilles de nombreuses espèces de plantes :
+
+-   Le rapport surface / masse sèche (positivement corrélé au pourcentage de stratège R)
+
+-   Le rapport matière sèche / matière fraîche (positivement corrélé au pourcentage de stratège S)
+
+-   La surface foliaire (positivement corrélée au pourcentage de stratège C)
+
+L'utilisation de ces données combinée à la construction d'un algorithme a permis d'attribuer pour chaque espèce étudiée le pourcentage correspondant à chaque type de strétégie écologique.
+
+# I/ Réalisation d'une analyse multivariée
+
+Nous reproduirons la première ACP de l'axe 1. Autrement dit, nous positionnerons chaque espèce dans l'espace multidimensionnel des paramètres biotiques (recouvrement arboré/arbustif/herbacé, proportion de litière, etc.) et abiotiques (pente, exposition, etc.) du milieu où elles ont été trouvées. Puis nous colorerons chaque espèce en fonction de son pourcentage de stratégie C, S ou R.
+
+Ainsi, sur la représentation graphique de l'ACP, nous pourrons "colorer" chaque espèce avec son pourcentage de C, et voir si les espèces avec un haut niveau de "C" sont présentes à un endroit précis de la représentation. Cela signifierait que certaines valeurs des paramètres du milieu sont favorablement occupées par des espèces compétitrices. De même, nous pourrons colorer les espèces selon leur pourcentage de R et de S.
+
+## I-1) Construction d'un tableau utilisable pour la réalisation de l'ACP
+
+Les résultats de l'étude de S.Pierce sont présents dans un tableau excel. Nous l'importons et ne gardons que les données qui nous intéressent : le nom de l'espèce, son pourcentage de C, de R, de S ainsi que la catégorie dans laquelle la plante est finalement classée (qui dépend directement des pourcentages).
+
+```{r}
+# tableau entier
+data_1 <- read_xlsx(here("data","Pierce_Donnees_CSR.xlsx"))
+# Nous ne gardons que les colonnes qui nous intéressent
+data_2 <- data_1[,c("Correct name with authors","C (%)","S (%)","R (%)","CSR")]
+head(data_2)
+```
+
+A présent, nous allons modifier le tableau data_2 : seules les lignes correspondant à des espèces observées sur le terrain seront conservées.
+
+La première étape consiste à récupérer la liste des espèces effectivement rencontrées sur le terrain, dans le tableur "RecouvrementHerbacees.ods".
+
+Chaque fois que le caractère "+" est utilisé pour décrire le recouvrement, il sera remplacé par 0.5. Les données manquantes (NA) correspondant à des espèces jamais rencontrées sur le terrain seront remplacées par 0.
+
+Nous réalisons la somme des 5 colonnes correspondant aux cinq quadrats par placette, pour toutes les espèces. Si l'espèce n'a jamais été observée sur la placette, la somme fera 0. Ces lignes seront ensuite éliminées. Nous obtenons alors un tableau excel donnant le recouvrement de toutes les espèces croisées sur le terrain par placette et pour les cinq quadrats.
+
+Le nom de toutes les plantes herbacées observées sont alors ajouttées dans une liste, puis on élimine les doublons afin d'avoir la liste des espèces observées sur le terrain (cad en compilant toutes les placettes).
+
+```{r}
+tot_espèces <- c() 
+for (k in 1:14){ 
+  recouvrement_herbacees <- read_ods(path = here("data","RecouvrementHerbacees.ods"),
+                                     sheet = k ) 
+  
+  #On transforme toutes les colonnes en caractères (pour éviter les problèmes de compatibilité de classes lorsqu'on remplace), on remplace NA par 0 et + par 0.5, puis on re-transforme toutes les colonnes en numériques
+  recouvrement_herbacees[, 5:9] <- lapply(recouvrement_herbacees[, 5:9], as.character)
+  recouvrement_herbacees[is.na(recouvrement_herbacees)] <- "0" 
+  recouvrement_herbacees[recouvrement_herbacees == "+"] <- "0.5" 
+  recouvrement_herbacees[, 5:9] <- lapply(recouvrement_herbacees[, 5:9], as.numeric) 
+  
+  liste_espèces <- recouvrement_herbacees %>% 
+    rowwise() %>% 
+    #somme des 5 colonnes pour 5 quadrats
+    mutate(somme_Q = sum(c_across(Q1:Q5))) %>% 
+    ungroup() %>% filter(somme_Q != 0) %>% #Si somme_Q !=0 ...
+    pull(Espèce)  #... alors on récupère l'élément de la colonne "Espèce"
+  tot_espèces <- c(tot_espèces,liste_espèces) }  
+
+liste_esp_uniques <- unique(tot_espèces) 
+liste <- data.frame(sp=liste_esp_uniques)  
+head(liste)
+```
+
+La deuxième étape est, à partir de cette liste, de ne sélectionner que les espèces pertinentes dans "data_2".
+
+Pour se faire, nous divisons la colonne comportant le nom de genre et le nom d'espèce en deux colonnes différentes. Par exemple, la case correspondant à "Viola hirsuta" deviendra deux cases : "Viola" + "Hirsuta".
+
+Cette étape est aussi faite pour le tableau "liste" recensant toutes les espèces observées sur le terrain.
+
+```{r}
+# Travail sur le tableau data_2
+data_2$'Correct name with authors' <- strsplit(data_2$'Correct name with authors', " ")
+data_2$'Correct name with authors' <- sapply(data_2$'Correct name with authors', function(x) paste(head(x, 2), collapse = " "))  #On ne garde que les 2 premiers mots, c'est-à-dire Genre espèce.
+
+data_2 <- data_2 %>% 
+  separate('Correct name with authors',into=c("genre","espece"))  
+
+#quercus pubescens est en doublon : on enlève une copie
+data_2 <- data_2[-2338,]
+
+# Travail sur le tableau liste
+liste2 <- liste%>%
+  mutate(sp=str_replace(sp," ","_"))%>%
+  separate(sp,sep="_",into=c("genre","espece"),remove=FALSE)  
+head(liste2)
+```
+
+Le tri du tableau data_2 sera fait selon le nom d'espèce : si le nom d'espèce est présent dans le tableau "liste" (cad si l'espèce a été observée sur le terrain), nous gardons cette ligne. Sinon la ligne est supprimée.
+
+```{r}
+data_2_espece <- liste2 %>% 
+  left_join(data_2,by=c("espece"="espece"))%>%
+  filter(genre.x==genre.y) 
+head(data_2_espece)
+```
+
+Dernière étape : il faut que notre tableau comporte aussi les données des paramètres (a)biotiques pour chaque espèce. On reprend alors le tableau construit dans l'axe I.
+
+```{r}
+#Importation du tableau contenant les valeurs des paramètres (a)biotiques
+TabCondMoy <- read.csv(here("Scripts", "TabHerbaceesEspeces.csv"), header = T)
+
+#Renommons la première colonne
+names(TabCondMoy)[1] = "sp"
+
+#Fusion de ce tableau avec notre tableau data_2_espece contenant les pourcentages de C, S et R pour chaque espèce rencontrée sur le terrain.
+#Certaines espèces du tableau data_2_espece ne sont pas retrouvées
+Tab_CSR <- merge(TabCondMoy, data_2_espece, by = "sp", all.x = T) #all.x = TRUE permet d'ajouter les espèces de TabCondMoy qui ne sont pas dans DataCSR, mais pas d'ajouter les espèces de DataCSR qui ne sont pas dans TabCondMoy ; notons que le tableau TabCondMoy ne contient que les espèces vues plus d'une fois (pour que la notion de "moyenne" soit pertinente).
+
+#Certaines colonnes ne nous intéressent pas.
+Tab_CSR <- Tab_CSR[, -c(11:13)]
+head(Tab_CSR)
+```
+
+## I-2) Analyse multivariée
+
+Préparons un tableau directement utilisable pour l'ACP.
+
+```{r}
+params_a_analyser <- c("Rlitiere", "RsolNu", "Rroche", "Rmousses", "Rarbustif", "Rarbore", "Pente", "Exp_N", "Alt")
+Tab_CSR_ACP <- Tab_CSR[, params_a_analyser]  # puis on sélectionne les colonnes
+rownames(Tab_CSR_ACP) <- Tab_CSR$sp  # on donne les noms d'espèces aux lignes
+
+head(Tab_CSR_ACP)
+```
+
+Faisons l'ACP en centrant-réduisant les données.
+
+```{r}
+acp10 <- PCA(Tab_CSR_ACP, scale.unit = TRUE, graph = F)
+```
+
+Visualisons cette ACP pour les stratèges C. Les espèces en gris sont celles qui sont présentes dans nos observations mais dont nous ne connaissons pas la stratégie CSR.
+
+```{r}
+p10 <- fviz_pca_biplot(acp10,
+                       geom = "point",
+                       pointsize = 3,
+                       col.var = "purple",
+                       col.ind = Tab_CSR$`C (%)`,
+                       gradient.cols = c("red", "green"),
+                       select.var = list(cos2 = 0.4),
+                       title = "Pourcentage de C",
+                       repel = TRUE) +
+       scale_color_gradient(name = "C (%)", low = "red", high = "green")
+
+p10
+```
+
+Les espèces compétitrices semblent être trouvées dans tous les types de milieu, peut-être davantage dans ceux avec beaucoup de sol nu (en haut à gauche de la représentation)
+
+Visualisons cette ACP pour les stratèges S :
+
+```{r}
+p11 <- fviz_pca_biplot(acp10, 
+                       geom = "point", 
+                       pointsize = 3, 
+                       repel = T, 
+                       col.var = "purple", 
+                       col.ind = Tab_CSR$`S (%)`, 
+                       gradient.cols = c("red", "green"), 
+                       select.var = list(cos2 = 0.4), 
+                       title = "Pourcentage de S") +
+       scale_color_gradient(name = "S (%)", low = "red", high = "green")
+
+
+p11
+```
+
+On dirait qu'un groupe de stratèges S se distingue en haut à droite de la représentation ; il est associé à une altitude et un couvert arbustif moyens.
+
+Visualisons cette ACP pour les stratèges R :
+
+```{r}
+p12 <- fviz_pca_biplot(acp10, 
+                       geom = "point", 
+                       pointsize = 3, 
+                       col.var = "purple", 
+                       col.ind = Tab_CSR$`R (%)`, 
+                       gradient.cols = c("red", "green"), 
+                       select.var = list(cos2 = 0.4), 
+                       title = "Pourcentage de R",
+                       repel=T)+
+  scale_color_gradient(name = "R (%)", low = "red", high = "green")
+p12
+```
+
+# II/ Comparaison du pourcentage de stratèges C, S et R en fonction du versant
+
+Cette fois-ci, on a besoin d'un tableau croisé indiquant pour chaque quadrat la surface occupée par chaque espèce. Nous pourrons ainsi calculer un pourcentage de stratèges C pour chaque quadrat. C'est le pourcentage de stratège C de chaque espèce observée dans ce quadrat, *pondéré* par le recouvrement de l'espèce.
+
+```{r}
+EspQuadrat <- read.csv(here("Scripts","TabReduitEspece.csv"))
+
+#Supprimons la première ligne qui ne donne qu'une liste de nombres, et renommons la colonne "Espèce" en "sp" pour fusionner plus facilement ce tableau avec Tab_CSR.
+EspQuadrat <- EspQuadrat[,-1]
+
+#Supprimons la colonne "Placette 5A quadrat 5" qui ne contient pas d'observation
+EspQuadrat <- EspQuadrat[,-6]
+
+names(EspQuadrat)[1] = "sp"
+head(EspQuadrat)
+```
+
+Ajoutons le pourcentage de C, S, R pour chaque espèce.
+
+```{r}
+Tab_CSR_2 <- merge(EspQuadrat, data_2_espece, by = "sp", all.x = T)
+
+head(Tab_CSR_2)
+```
+
+Maintenant, calculons une "moyenne de C" pour chaque quadrat. On fera de même pour S et R.
+
+```{r}
+#Récupérons les noms des quadrats
+quadrats <- colnames(EspQuadrat)[-1]
+
+strategie = function(CSR){
+  #CSR sera `C (%)` ou `S (%)` ou `R (%)`
+  
+  moy_par_quadrat <- sapply(quadrats, function(i){
+    #Pour chaque quadrat, nous récupérons :
+    #(1) la liste des pourcentages CSR (1 pourcentage par espèce)
+    #(2) la liste des recouvrements
+    values <- Tab_CSR_2[ , CSR]
+    poids <- Tab_CSR_2[, i]
+    
+    
+    #Nous ne sélectionnons que les espèces pour qui la donnée CSR est présente
+    
+    values_poids <- na.omit(data.frame(values, poids))
+    
+    #D'où la moyenne pondérée de stratégie C ou S ou R
+    moy <- weighted.mean(x = values_poids[1], w = values_poids[2])
+    return (moy)
+  })
+  return (moy_par_quadrat)
+}
+
+```
+
+```{r}
+MoyC = strategie('C (%)')
+MoyS = strategie('S (%)')
+MoyR = strategie('R (%)')
+MoyC[1:10]
+```
+
+Ajoutons la donnée de versant.
+
+```{r}
+DonneesPlacettes = read_ods(here("data", "DonneesPlacettes.ods"))
+```
+
+```{r}
+versant <- sapply(quadrats, function(i){
+  #Le site et la placette du quadrat sont contenus dans le nom de ce quadrat, par exemple "X5AQ5" ou "X13BQ3"
+  if (nchar(i) == 5){
+    site = as.numeric(substring(i, 2,2))
+    placette = substring(i,3,3)
+  } else{
+    site = as.numeric(substring(i, 2,3))
+    placette = substring(i, 4,4)
+  }
+  #On récupère le versant associé à ce site et cette placette
+  vers <- DonneesPlacettes[DonneesPlacettes$Site == site & DonneesPlacettes$Placette == placette,]$Versant
+  
+  return(as.character(vers))
+})
+```
+
+Créons un tableau récapitulatif.
+
+```{r}
+dfCSR = data.frame(quadrats, versant, MoyC, MoyS, MoyR)
+head(dfCSR)
+```
+
+Représentons graphiquement les pourcentages de % pour les quadrats du Sud vs Nord vs Fond de vallée.
+
+```{r}
+bC <- boxplot(dfCSR$MoyC ~ dfCSR$versant, col = c("darkblue", "darkred", "lightyellow"), xlab = "Versant", ylab = "% C moyen par quadrat")
+```
+
+```{r}
+bS <- boxplot(dfCSR$MoyS ~ dfCSR$versant, col = c("darkblue", "darkred", "lightyellow"), xlab = "Versant", ylab = "% S moyen par quadrat")
+```
+
+```{r}
+bR <- boxplot(dfCSR$MoyR ~ dfCSR$versant, col = c("darkblue", "darkred", "lightyellow"), xlab = "Versant", ylab = "% R moyen par quadrat")
+```
+
+Existe-t-il des différences significatives ? On peut réaliser des tests de comparaison de moyennes entre versants 2 à 2. L'hypothèse nulle est : "les moyennes sont égales". L'hypothèse de normalité et/ou d'homoscédasticité des données prises 2 à 2 ne sont pas toujours respectées.
+
+```{r}
+#Exemple de test de normalité
+shapiro.test(dfCSR[dfCSR$versant == "N", ]$MoyR)
+```
+
+```{r}
+#Exemple de test d'homoscédasticité
+var.test(dfCSR[dfCSR$versant == "N", ]$MoyC, dfCSR[dfCSR$versant == "S", ]$MoyC)
+```
+
+Ainsi, un test de Student n'apparaît pas toujours pertinent, et nous utiliserons des tests non-paramétriques de wilcoxon. Pour éviter d'accumuler les erreurs de première classe, nous introduisons une correction de Bonferroni.
+
+(1) Le % de C varie-t-il entre les versants ?
+
+```{r}
+pairwise.wilcox.test(dfCSR$MoyC, g =  dfCSR$versant, p.adjust.method = "bonf")
+```
+
+Oui : le fond de vallée contient significativement plus de stratèges C que les versants Nord et Sud.
+
+(2) Le % de S varie-t-il entre les versants ?
+
+```{r}
+pairwise.wilcox.test(dfCSR$MoyS, g =  dfCSR$versant, p.adjust.method = "bonf")
+```
+
+Non, la différence n'est pas significative.
+
+(3) Le % de R varie-t-il entre les versants ?
+
+```{r}
+pairwise.wilcox.test(dfCSR$MoyR, g =  dfCSR$versant, p.adjust.method = "bonf")
+```
+
+Non, la différence n'est pas significative.
